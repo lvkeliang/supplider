@@ -8,6 +8,8 @@ import type {
   ImportReport,
   Inspection,
   Page,
+  RiskReport,
+  ShellRiskReport,
   Supplier,
   SupplierSummary,
 } from './types'
@@ -73,6 +75,13 @@ export const api = {
   // Non-AI: pure local date math; always available.
   expiringReminders: (within = 90) =>
     request<ExpiringReport>('GET', withQuery('/api/v1/reminders/expiring', { within })),
+
+  // Shell-company detection (空壳特征检测): pure local rules, no AI/network.
+  // Live signal report for one supplier (explains WHY it was flagged).
+  supplierRisk: (id: string) =>
+    request<RiskReport>('GET', `/api/v1/suppliers/${encodeURIComponent(id)}/risk`),
+  // Manual-review queue: active suppliers the local rules flag as shell-risk.
+  shellRiskQueue: () => request<ShellRiskReport>('GET', '/api/v1/risk/shell'),
 
   listSuppliers: (p: ListParams = {}) =>
     request<Page<SupplierSummary>>(

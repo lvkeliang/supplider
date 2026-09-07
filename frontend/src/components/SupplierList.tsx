@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type ListParams } from '../api'
-import type { ExpiringReport, SupplierSummary } from '../types'
+import type { ExpiringReport, ShellRiskReport, SupplierSummary } from '../types'
 import { QUAL_LEVELS, STATUS_ARCHIVED } from '../types'
 import type { Go } from '../App'
+
+/** Chinese tag + tailwind classes for one risk severity. */
+function severityTag(sev: string): { label: string; cls: string } {
+  switch (sev) {
+    case 'high':
+      return { label: '高', cls: 'bg-red-200 text-red-900' }
+    case 'medium':
+      return { label: '中', cls: 'bg-orange-200 text-orange-900' }
+    default:
+      return { label: '低', cls: 'bg-slate-200 text-slate-700' }
+  }
+}
 
 /** Human tag for one expiry bucket. */
 function expiryTag(bucket: string): string {
@@ -32,18 +44,24 @@ export function SupplierList({ go }: { go: Go }) {
   const [error, setError] = useState('')
   const [reminders, setReminders] = useState<ExpiringReport | null>(null)
   const [showReminders, setShowReminders] = useState(false)
+  const [shellQueue, setShellQueue] = useState<ShellRiskReport | null>(null)
+  const [showShell, setShowShell] = useState(false)
 
-  // Qualification-expiry banner (non-AI maintenance scan). Loaded once on
-  // mount; an empty/absent report renders nothing.
+  // Maintenance banners (non-AI scans). Loaded once on mount; empty/absent
+  // reports render nothing. Best-effort: a failure never blocks the list.
   useEffect(() => {
     api
       .expiringReminders()
       .then((rep) => {
         if (rep.count > 0) setReminders(rep)
       })
-      .catch(() => {
-        /* reminder banner is best-effort — never block the list */
+      .catch(() => {})
+    api
+      .shellRiskQueue()
+      .then((rep) => {
+        if (rep.count > 0) setShellQueue(rep)
       })
+      .catch(() => {})
   }, [])
 
   const load = useCallback(
@@ -217,6 +235,49 @@ export function SupplierList({ go }: { go: Go }) {
         </div>
       )}
 
+      {shellQueue && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <button
+            className="flex w-full items-center gap-2 text-left font-medium"
+            onClick={() => setShowShell((v) => !v)}
+          >
+            <span>⚠️</span>
+            <span>
+              {shellQueue.count} 家供应商存在空壳风险，建议人工审核
+              （本地规则自动检测，无需 AI）
+            </span>
+            <span className="ml-auto text-xs opacity-70">{showShell ? '收起 ▲' : '展开 ▼'}</span>
+          </button>
+          {showShell && (
+            <ul className="mt-2 divide-y divide-current/10 border-t border-current/10">
+              {shellQueue.items.map((it) => {
+                const top =
+                  it.signals.find((s) => s.severity === 'high') ??
+                  it.signals.find((s) => s.severity === 'medium') ??
+                  it.signals[0]
+                const tag = top ? severityTag(top.severity) : null
+                return (
+                  <li key={it.supplier_id} className="py-1.5">
+                    <button
+                      className="flex w-full items-center gap-2 text-left"
+                      onClick={() => go({ name: 'detail', id: it.supplier_id })}
+                    >
+                      {tag && (
+                        <span className={`rounded-full px-2 py-0.5 text-xs ${tag.cls}`}>
+                          {tag.label}风险
+                        </span>
+                      )}
+                      <span className="font-medium">{it.supplier_name}</span>
+                      <span className="truncate text-xs opacity-80">{top?.message}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
       {/* Results */}
@@ -229,6 +290,14 @@ export function SupplierList({ go }: { go: Go }) {
           >
             <div className="flex items-center gap-2">
               <span className="font-medium text-slate-800">{s.name}</span>
+              {s.shell_risk && (
+                <span
+                  className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700"
+                  title="本地规则检测到空壳风险，点开详情查看逐条信号"
+                >
+                  ⚠ 空壳风险
+                </span>
+              )}
               {s.status === STATUS_ARCHIVED && (
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">已归档</span>
               )}

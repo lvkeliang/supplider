@@ -12,6 +12,9 @@
 //	PATCH  /api/v1/suppliers/{id}      partial update (auto change_log)
 //	DELETE /api/v1/suppliers/{id}      archive
 //	POST   /api/v1/suppliers/{id}/restore
+//	GET    /api/v1/suppliers/{id}/risk          live shell-company rule report
+//	POST   /api/v1/suppliers/{id}/risk-check    re-run rules + persist verdict
+//	GET    /api/v1/risk/shell                   shell-risk review queue (active)
 //	POST   /api/v1/suppliers/{id}/attachments   upload (multipart, ≤50MB)
 //	GET    /api/v1/attachments/{key...}         download/stream
 //	GET    /api/v1/import/template              download .xlsx template
@@ -78,6 +81,9 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("PATCH /api/v1/suppliers/{id}", s.handleUpdate)
 	s.Mux.HandleFunc("DELETE /api/v1/suppliers/{id}", s.handleArchive)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/restore", s.handleRestore)
+	s.Mux.HandleFunc("GET /api/v1/suppliers/{id}/risk", s.handleSupplierRisk)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-check", s.handleRiskCheck)
+	s.Mux.HandleFunc("GET /api/v1/risk/shell", s.handleShellRiskQueue)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/attachments", s.handleUploadAttachment)
 	s.Mux.HandleFunc("GET /api/v1/attachments/{key...}", s.handleDownloadAttachment)
 	s.Mux.HandleFunc("GET /api/v1/import/template", s.handleImportTemplate)
@@ -531,10 +537,10 @@ func filterFromQuery(q url.Values) datamodel.SupplierFilter {
 // alert list (most urgent first) plus aggregate counts the UI renders as a
 // banner without re-deriving buckets.
 type expiringReport struct {
-	GeneratedAt time.Time             `json:"generated_at"`
-	WithinDays  int                   `json:"within_days"`
-	Count       int                   `json:"count"`
-	Expired     int                   `json:"expired"` // subset of Count, bucket == expired
+	GeneratedAt time.Time              `json:"generated_at"`
+	WithinDays  int                    `json:"within_days"`
+	Count       int                    `json:"count"`
+	Expired     int                    `json:"expired"` // subset of Count, bucket == expired
 	Items       []supplier.ExpiryAlert `json:"items"`
 }
 
@@ -565,6 +571,56 @@ func (s *Server) handleExpiringReminders(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusOK, rep)
+}
+
+// ---------- shell-company risk (空壳特征检测, non-AI) ----------
+
+// handleSupplierRisk answers the live rule-engine report for one supplier:
+// the shell_risk verdict plus the full, explainable signal list. The report
+// is computed on demand from the stored document (not read from the
+// denormalized flag) so it always reflects the current rules.
+func (s *Server) handleSupplierRisk(w http.ResponseWriter, r *http.Request) {
+	rep, err := s.Service.RiskReport(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
+// handleRiskCheck re-runs the local rules and persists the refreshed verdict
+// (backfill / on-demand re-审核), returning the same report shape as the
+// live GET.
+func (s *Server) handleRiskCheck(w http.ResponseWriter, r *http.Request) {
+	rep, err := s.Service.CheckRisks(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
+// shellRiskReport is the GET /api/v1/risk/shell payload: the manual-review
+// queue (active suppliers the local rules flag), most suspicious first.
+type shellRiskReport struct {
+	GeneratedAt time.Time                `json:"generated_at"`
+	Count       int                      `json:"count"`
+	Items       []supplier.ShellRiskItem `json:"items"`
+}
+
+// handleShellRiskQueue runs the live review scan (审核队列). Non-AI base
+// path — no network, no keys; the [AI] 空壳风险报告 layers on later.
+func (s *Server) handleShellRiskQueue(w http.ResponseWriter, r *http.Request) {
+	items, err := s.Service.ShellRiskSuppliers(r.Context())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, shellRiskReport{
+		GeneratedAt: time.Now().UTC(),
+		Count:       len(items),
+		Items:       items,
+	})
 }
 
 // ---------- export ----------

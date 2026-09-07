@@ -1,9 +1,32 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, apiUrl } from '../api'
-import type { Supplier } from '../types'
+import type { RiskReport, RiskSignal, Supplier } from '../types'
 import { STATUS_ARCHIVED, VIS_LABELS } from '../types'
 import { DocumentCard, Field } from './Card'
 import type { Go } from '../App'
+
+/** Tailwind classes + Chinese label for one risk severity. */
+function sevStyle(sev: string): { cls: string; label: string } {
+  switch (sev) {
+    case 'high':
+      return { cls: 'bg-red-100 text-red-700', label: '高' }
+    case 'medium':
+      return { cls: 'bg-orange-100 text-orange-700', label: '中' }
+    default:
+      return { cls: 'bg-slate-100 text-slate-600', label: '低' }
+  }
+}
+
+function SignalRow({ sig }: { sig: RiskSignal }) {
+  const s = sevStyle(sig.severity)
+  return (
+    <li className="flex items-start gap-2 text-sm">
+      <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs ${s.cls}`}>{s.label}</span>
+      <span className="font-mono text-xs text-slate-400">{sig.code}</span>
+      <span className="text-slate-700">{sig.message}</span>
+    </li>
+  )
+}
 
 /**
  * Detail page — 文档卡片式档案: each facet is an independent collapsible
@@ -12,6 +35,7 @@ import type { Go } from '../App'
  */
 export function SupplierDetail({ id, go }: { id: string; go: Go }) {
   const [doc, setDoc] = useState<Supplier | null>(null)
+  const [risk, setRisk] = useState<RiskReport | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -21,6 +45,11 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
       .getSupplier(id)
       .then(setDoc)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    // Live local-rule report (signals explain the verdict). Best-effort.
+    api
+      .supplierRisk(id)
+      .then(setRisk)
+      .catch(() => setRisk(null))
   }, [id])
 
   useEffect(load, [load])
@@ -105,16 +134,42 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
         </div>
       </div>
 
-      {/* Risk flags banner (only when a flag is set) */}
-      {doc.risk_flags && (doc.risk_flags.shell_risk || doc.risk_flags.executed_person || doc.risk_flags.admin_penalty) && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-          风险标记：
-          {doc.risk_flags.shell_risk && <span className="ml-1">空壳风险</span>}
-          {doc.risk_flags.executed_person && <span className="ml-1">被执行人</span>}
-          {doc.risk_flags.admin_penalty && <span className="ml-1">行政处罚</span>}
-          {doc.risk_flags.notes && <span className="ml-1">（{doc.risk_flags.notes}）</span>}
-        </div>
-      )}
+      {/* 风险检测：本地规则引擎（非 AI）+ 高版本外部信号。无信号则不显示。 */}
+      {(() => {
+        const ext = doc.risk_flags
+        const external =
+          (ext?.executed_person ?? false) || (ext?.admin_penalty ?? false)
+        const signals = risk?.signals ?? []
+        const shell = risk?.shell_risk ?? ext?.shell_risk ?? false
+        if (!shell && !external && signals.length === 0) return null
+        return (
+          <DocumentCard
+            title={
+              shell || external ? (
+                <span className="text-red-700">⚠ 风险检测{shell ? ' · 空壳风险' : ''}</span>
+              ) : (
+                '资料补全建议'
+              )
+            }
+            defaultOpen={shell || external}
+          >
+            <ul className="space-y-1.5">
+              {ext?.executed_person && (
+                <SignalRow sig={{ code: 'EXT', severity: 'high', message: '被执行人（外部工商/司法数据）' }} />
+              )}
+              {ext?.admin_penalty && (
+                <SignalRow sig={{ code: 'EXT', severity: 'high', message: '行政处罚（外部工商数据）' }} />
+              )}
+              {signals.map((sig) => (
+                <SignalRow key={sig.code} sig={sig} />
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-slate-400">
+              以上为本地规则自动检测结果（信用代码校验位 / 成立时长 / 资料完整度 / 资质 / 注册资本等），仅供人工审核参考，不会阻断录入。
+            </p>
+          </DocumentCard>
+        )
+      })()}
 
       {/* 基本信息 */}
       <DocumentCard title="基本信息">

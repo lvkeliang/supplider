@@ -13,7 +13,7 @@ export function DocumentCard({
   children,
   actions,
 }: {
-  title: string
+  title: ReactNode
   count?: number
   defaultOpen?: boolean
   children: ReactNode

@@ -79,6 +79,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Supplier,
 		Source: in.Source,
 	}}
 	recomputeRating(doc)
+	s.applyRisk(doc) // 空壳特征检测：非 AI 规则引擎，随写入刷新 risk_flags
 
 	// ID generation retries on the (astronomically unlikely) collision.
 	const maxAttempts = 5
@@ -182,6 +183,7 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*domai
 	doc.ChangeLog = append(doc.ChangeLog, changes...)
 	doc.UpdatedAt = now
 	recomputeRating(doc)
+	s.applyRisk(doc) // 资料变更后重新跑空壳规则
 
 	if err := s.store.Put(ctx, doc); err != nil {
 		return nil, err

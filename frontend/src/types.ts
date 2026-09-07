@@ -107,6 +107,8 @@ export interface SupplierSummary {
   top_qual?: string
   rating: number
   status: string
+  /** Denormalized local-rule shell-company flag (空壳风险), set on write. */
+  shell_risk?: boolean
   updated_at: string
 }
 
@@ -138,6 +140,39 @@ export interface ExpiringReport {
   count: number
   expired: number
   items: ExpiryAlert[]
+}
+
+// ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
+
+/** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */
+export interface RiskSignal {
+  code: string
+  severity: 'high' | 'medium' | 'low'
+  message: string
+}
+
+/** Live rule-engine report for one supplier (GET /api/v1/suppliers/{id}/risk). */
+export interface RiskReport {
+  shell_risk: boolean
+  signals: RiskSignal[]
+  checked_at: string
+}
+
+/** One supplier in the manual-review queue, with its fired signals. */
+export interface ShellRiskItem {
+  supplier_id: string
+  supplier_name: string
+  province?: string
+  city?: string
+  high_count: number
+  medium_count: number
+  signals: RiskSignal[]
+}
+
+export interface ShellRiskReport {
+  generated_at: string
+  count: number
+  items: ShellRiskItem[]
 }
 
 export interface Features {

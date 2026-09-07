@@ -14,6 +14,7 @@
 //	srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
 //	srm-cli compare <id> <id>... [--criteria price,delivery,qual]
 //	srm-cli expiring [--within N] [--json]   资质到期提醒 (90/30/7 天窗口 + 已过期)
+//	srm-cli risk [id] [--json]               空壳特征检测：无 id 列审核队列，带 id 看该供应商信号
 //
 // Shared [filters]: --province --city --district --category --min-qual
 // --min-rating --owner --q.
@@ -61,6 +62,8 @@ func main() {
 		err = cmdCompare(args)
 	case "expiring":
 		err = cmdExpiring(args)
+	case "risk":
+		err = cmdRisk(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -87,6 +90,9 @@ Usage:
   srm-cli compare <id> <id>... [--criteria price,delivery,qual]
   srm-cli expiring [--within N] [--json]
                                  资质到期提醒：列出已过期/7 天内/30 天内/90 天内到期的资质
+  srm-cli risk [id] [--json]
+                                 空壳特征检测：无 id 列出待人工审核的空壳风险供应商；
+                                 带 id 显示该供应商的逐条风险信号（纯本地规则，无需 AI）
 
 Filters (shared by list/search/export):
   --province 省  --city 市  --district 区县  --category 品类(逗号分隔, OR)
@@ -707,6 +713,138 @@ func daysLeftLabel(days int) string {
 		return "今天到期"
 	default:
 		return fmt.Sprintf("%d 天后", days)
+	}
+}
+
+// ---------- risk (空壳特征检测, non-AI) ----------
+
+// riskSignal mirrors risk.Signal JSON.
+type riskSignal struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+}
+
+// riskReport mirrors risk.Report JSON.
+type riskReport struct {
+	ShellRisk bool         `json:"shell_risk"`
+	Signals   []riskSignal `json:"signals"`
+	CheckedAt time.Time    `json:"checked_at"`
+}
+
+// shellRiskItem mirrors supplier.ShellRiskItem JSON.
+type shellRiskItem struct {
+	SupplierID   string       `json:"supplier_id"`
+	SupplierName string       `json:"supplier_name"`
+	Province     string       `json:"province"`
+	City         string       `json:"city"`
+	HighCount    int          `json:"high_count"`
+	MediumCount  int          `json:"medium_count"`
+	Signals      []riskSignal `json:"signals"`
+}
+
+// cmdRisk exposes the non-AI shell-company rule engine: with a supplier id it
+// prints that supplier's individual signals; without one it lists the
+// manual-review queue (active suppliers the local rules flag).
+func cmdRisk(args []string) error {
+	fs := flag.NewFlagSet("risk", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+
+	// With an id: that supplier's live signal list.
+	if fs.NArg() > 0 {
+		id := fs.Arg(0)
+		resp, err := http.Get(apiBase() + "/api/v1/suppliers/" + url.PathEscape(id) + "/risk")
+		if err != nil {
+			return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return decodeAPIError(resp)
+		}
+		var rep riskReport
+		if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
+			return err
+		}
+		if *asJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(rep)
+		}
+		if !rep.ShellRisk {
+			fmt.Printf("%s  ✓ 未发现空壳风险（本地规则全部通过）\n", id)
+			return nil
+		}
+		fmt.Printf("%s  ⚠ 空壳风险：%d 条信号\n", id, len(rep.Signals))
+		for _, sig := range rep.Signals {
+			fmt.Printf("  %s  %s\n", riskSeverityTag(sig.Severity), sig.Message)
+		}
+		return nil
+	}
+
+	// No id: the manual-review queue (active, flagged suppliers).
+	resp, err := http.Get(apiBase() + "/api/v1/risk/shell")
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var rep struct {
+		Count int             `json:"count"`
+		Items []shellRiskItem `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	}
+	if rep.Count == 0 {
+		fmt.Println("(no suppliers flagged for shell-company risk)")
+		return nil
+	}
+	rows := [][]string{{"等级", "高/中", "供应商", "地域", "首要信号"}}
+	for _, it := range rep.Items {
+		rows = append(rows, []string{
+			"⚠ 风险",
+			fmt.Sprintf("%d高/%d中", it.HighCount, it.MediumCount),
+			truncateCell(it.SupplierName, 24),
+			truncateCell(strings.TrimSpace(it.Province+" "+it.City), 12),
+			truncateCell(topRiskMessage(it.Signals), 42),
+		})
+	}
+	printTable(rows)
+	fmt.Fprintf(os.Stderr, "\n%d 家供应商待人工审核（空壳特征检测，纯本地规则，无需 AI）。\n", rep.Count)
+	return nil
+}
+
+// topRiskMessage returns the highest-severity signal's message (high before
+// medium before low), falling back to the first signal.
+func topRiskMessage(sigs []riskSignal) string {
+	for _, want := range []string{"high", "medium", "low"} {
+		for _, s := range sigs {
+			if s.Severity == want {
+				return s.Message
+			}
+		}
+	}
+	return ""
+}
+
+func riskSeverityTag(sev string) string {
+	switch sev {
+	case "high":
+		return "✗ 高"
+	case "medium":
+		return "! 中"
+	default:
+		return "· 低"
 	}
 }
 

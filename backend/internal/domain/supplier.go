@@ -161,16 +161,19 @@ type Attachment struct {
 // Summary is the list-page projection. Performance red line: list endpoints
 // return summary fields only — never full documents.
 type Summary struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Province   string    `json:"province"`
-	City       string    `json:"city"`
-	District   string    `json:"district,omitempty"`
-	Categories []string  `json:"categories,omitempty"`
-	TopQual    string    `json:"top_qual,omitempty"` // highest qualification label
-	Rating     float64   `json:"rating"`
-	Status     string    `json:"status"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Province   string   `json:"province"`
+	City       string   `json:"city"`
+	District   string   `json:"district,omitempty"`
+	Categories []string `json:"categories,omitempty"`
+	TopQual    string   `json:"top_qual,omitempty"` // highest qualification label
+	Rating     float64  `json:"rating"`
+	Status     string   `json:"status"`
+	// ShellRisk is the denormalized local-rule shell-company flag (空壳风险),
+	// set on write so the list can badge risky suppliers without a scan.
+	ShellRisk bool      `json:"shell_risk,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ToSummary projects a full document onto the list-page shape.
@@ -186,6 +189,7 @@ func ToSummary(s *Supplier) Summary {
 		TopQual:    top,
 		Rating:     s.Rating,
 		Status:     s.Status,
+		ShellRisk:  s.RiskFlags.ShellRisk,
 		UpdatedAt:  s.UpdatedAt,
 	}
 }

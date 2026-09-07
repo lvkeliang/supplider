@@ -5,18 +5,62 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 下一步优先级（个人版 MVP）
 
-1. **空壳特征检测（非 AI 规则引擎）**：录入/审核环节的自动校验——供应商服务加
-   `CheckRisks` 规则（注册资本过低/成立日期过新/信用代码校验位/资质重复/信息缺失等
-   纯本地规则），结果写 risk_flags；无 Key 可用，AI 风险报告作为增强层后挂。
-2. **Tauri 安装包真机验证**：shell 代码与 sidecar 已完成并通过 HTTP 层 E2E（见下），
+1. **Tauri 安装包真机验证**：shell 代码与 sidecar 已完成并通过 HTTP 层 E2E（见下），
    但本机无 Rust 工具链，未跑过 `tauri build`；需在有 Rust 的机器执行
    `scripts/build-sidecar.sh && cd src-tauri && tauri build`，验证安装包体积（目标 ~15MB）
    与双击拉起 sidecar。图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。
-3. **Meilisearch 内嵌适配器**：实现 `search.Index` 接口替换 SQLite FTS5（当前 FTS 是过渡方案，行为已被测试钉住，可直接对照）。
+2. **Meilisearch 内嵌适配器**：实现 `search.Index` 接口替换 SQLite FTS5（当前 FTS 是过渡方案，行为已被测试钉住，可直接对照）。
+3. **空壳检测的人工审核闭环**：规则引擎+队列已落地（见下），但"人工审批入库/标记已核
+   验/误报忽略"的状态流转还没做——可在 risk_flags 加 `reviewed/verified` 位 + API
+   `POST /suppliers/{id}/risk-review`，详情页加"标记已核验"按钮。
 4. 可见性策略收紧流程（个人版只需 0/1 两级的数据处置骨架）。
-5. MCP 暴露（srm-cli 已有 search/add/list/info/export/compare/expiring，包一层 MCP Tools/Resources）。
+5. MCP 暴露（srm-cli 已有 search/add/list/info/export/compare/expiring/risk，包一层 MCP Tools/Resources）。
 
 ## 已完成
+
+### 2026-09-08：空壳特征检测（非 AI 规则引擎）全链路落地——生命周期"审核"无 AI 基线
+
+录入/审核环节的自动校验，纯本地规则、无网络、无 Key；AI 空壳风险报告（LLM）以后作为
+增强层叠加在**这些信号**之上。规则保守：只标记供人工复核，**绝不阻断录入**。
+
+- **规则引擎**（`internal/risk/risk.go`，纯函数 `Evaluate(supplier, now) Report`）：
+  - R1xx 身份：R101 未填信用代码(low) / R102 长度≠18 或含非法字符(high) /
+    **R103 信用代码校验位不符 GB 32100-2015(high)**——`CheckCreditCode` 实现国标
+    加权校验（C=(31−Σvᵢwᵢ mod31) mod31），真实代码必过、编造代码几乎必挂。
+  - R2xx 档案：R201 成立未满 180 天(medium，临时注册/买壳) / R202 核心资料缺 ≥2 项
+    (medium) / R203 施工类无任何资质(medium) / **R204 资质重复(medium)**——同证书号
+    出现多次（确凿）或同类型+同等级重复（堆砌资质/录入重复）。
+  - R3xx 财务：R301 注册资本 <100 万元(low)，解析"5000万人民币/1.2亿"等中文写法。
+  - 判定：任一 high，或 ≥2 条 medium → `ShellRisk=true`；low 仅提示补全。信号带稳定
+    code + 中文解释，`Notes()` 汇总 medium/high 写入 risk_flags.notes。
+- **生命周期接线**（`internal/supplier/risk.go`）：`applyRisk(doc)` 在 Create/Update
+  与 `recomputeRating` 同处调用——risk_flags 与 rating 一样是**派生数据**，随写入刷新、
+  **不产生 change_log 噪音**。只覆盖引擎字段（ShellRisk/Notes），高版本外部信号
+  （被执行人/行政处罚，企查查 API）原样保留。
+  - `RiskReport(id)`：实时跑规则返回完整信号（不落库），详情页解释"为什么被标记"。
+  - `CheckRisks(id)`：重跑并持久化（规则升级后的回填/按需复审），仅在结论变化时写库。
+  - `ShellRiskSuppliers()`：keyset 分页遍历**在库**供应商实时评估，返回审核队列
+    （高/中信号计数 + 信号明细），按 high→medium→名称排序；归档不产生审核噪音。
+  - `domain.Summary` 加 `shell_risk` 反范式标志，列表页无需扫描即可打标。
+- **API**：`GET /api/v1/suppliers/{id}/risk`（实时信号）、`POST .../risk-check`
+  （重跑+持久化）、`GET /api/v1/risk/shell`（审核队列 {count,items[]}）。
+- **CLI**：`srm-cli risk [id] [--json]`——无 id 列审核队列（CJK 等宽表格，等级/高中
+  计数/供应商/地域/首要信号）；带 id 显示该供应商逐条信号（✗高/!中/·低）；适合 cron。
+- **前端**：列表卡片有 `⚠ 空壳风险` 红标；列表上方红色可展开横幅（N 家待审核，点击
+  直达详情）；详情页"风险检测"文档卡片逐条展示信号（严重度色标 + 规则 code + 中文解释），
+  无信号不显示；外部信号（被执行人/行政处罚）以 EXT 行并入同卡。
+- 测试：`risk/risk_test.go`（R103 校验位正反例、非法字符、长度、R201/202/203、
+  **R204 类型+等级/证书号重复与不同等级不误报**、低资本不单独触发、贸易商不触发施工
+  规则）；`supplier/risk_test.go`（干净供应商不标记且进 summary、坏校验码标记+实时报告
+  含 R103、Update 后风险翻转/修复后清除、审核队列只含在库且归档后移出、CheckRisks
+  保留外部 ExecutedPerson 标志）。全量 `go test` 在默认与 `-tags personal` 下全绿，
+  `-tags enterprise`/`personal` 编译通过；前端 `tsc + vite build` 通过。
+- E2E（真实 HTTP，personal 档 ai_enabled=false）：坏代码+资料简陋施工商 → shell_risk
+  并列出 R103/R202/R203；正规贸易商 → 不标记；`/risk/shell` 仅 1 家且 high=1/med=2；
+  list summary 带 shell_risk；CLI 队列/详情/干净三种输出正确；R204 同证书号被捕获；
+  POST risk-check 返回 200。
+
+
 
 ### 2026-09-08：资质到期提醒（90/30/7 天 + 已过期）——生命周期"维护"非 AI 基线
 
