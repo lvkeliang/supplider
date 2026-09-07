@@ -1,0 +1,75 @@
+// Command suppliderd is the Supplider backend daemon. On the personal tier
+// it runs as a Tauri sidecar: the desktop shell launches this binary on
+// app start (the user never sees it), serving the local HTTP API on
+// 127.0.0.1. The same binary code builds for small_business/enterprise
+// tags with different adapters wired by storefactory.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/supplider/supplider/backend/internal/featureflag"
+	"github.com/supplider/supplider/backend/internal/httpapi"
+	"github.com/supplider/supplider/backend/internal/storefactory"
+	"github.com/supplider/supplider/backend/internal/supplier"
+	"github.com/supplider/supplider/backend/internal/tier"
+)
+
+func main() {
+	addr := flag.String("addr", envOr("SRM_HTTP_ADDR", "127.0.0.1:7612"), "HTTP listen address")
+	dataDir := flag.String("data-dir", envOr("SRM_DATA_DIR", ""), "data directory (personal tier)")
+	flag.Parse()
+
+	log.Printf("suppliderd starting: tier=%s addr=%s data-dir=%q", tier.Current(), *addr, *dataDir)
+
+	store, err := storefactory.Open(storefactory.Config{DataDir: *dataDir})
+	if err != nil {
+		log.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	svc := supplier.NewService(store)
+
+	// Feature matrix: AI flags stay off until a gateway provider is
+	// configured (MVP ships without AI keys — all AI entries hidden).
+	feats := featureflag.Default().WithAIState(false)
+
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           httpapi.New(svc, feats).Mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("http server: %v", err)
+		}
+	}()
+	log.Printf("suppliderd ready on http://%s", *addr)
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+	log.Println("suppliderd stopped")
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
