@@ -11,17 +11,52 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    与双击拉起 sidecar。图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。
 2. **可见性策略收紧流程**：个人版只需 0/1 两级的数据处置骨架（扫描不合规 → 通知录入者
    → 缓冲标记"待调整" → 超时降级）。当前可见性字段/校验已在，缺策略执行流程。
-3. **MCP 暴露**：srm-cli 已有 search/add/list/info/export/compare/expiring/risk/review，
-   包一层 MCP Tools/Resources + Markdown Skill 文件供外部 AI Agent 读取。
-4. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
+3. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
    Meilisearch 是 Rust 独立 server 二进制、无可内嵌 Go 库，塞进个人版会破坏"单二进制
    零外部依赖 / ~15MB"硬约束。个人版搜索继续用 SQLite FTS5（已在 `search.Index` 接口
    之后，行为被测试钉住）；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）
    实现同一接口，届时照 FTS5 测试对照即可。
-5. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
+4. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
    保留不被引擎覆盖）；`confirmed_risk → 黑名单`联动可在淘汰阶段做。
 
+5. srm-mcp 打包/分发：`go build -tags personal` 已出独立 stdio 二进制约 12MB，后续
+   可纳入 scripts 构建/发布产物，随桌面版分发或单独提供（MCP 主机配置 command 即 srm-mcp）。
+
 ## 已完成
+
+### 2026-09-08：MCP 开放接入（Tools / Resources / Prompts + Skill 文件）
+
+把供应商平台通过 Model Context Protocol 暴露给外部 AI Agent（Claude Desktop /
+Cursor 等）。新增 `internal/mcp` 包 + `cmd/srm-mcp` 独立 stdio 二进制；与 httpapi
+同属**纯业务层**，只依赖 `*supplier.Service`，不碰具体存储驱动；stdlib 手写
+JSON-RPC 2.0（无 SDK 依赖，保持个人版纯 Go 小二进制）。
+
+- **传输**：stdio 换行分隔 JSON-RPC。`Server.Serve` 逐行读请求回响应；notification
+  （无 id）不回包；日志走 stderr，stdout 只跑协议。实现 initialize/ping/
+  tools(list,call)/resources(list,templates/list,read)/prompts(list,get)；未知方法
+  回 -32601；工具内错误用 MCP `isError` 文本块（让模型自我纠正）而非协议错误。
+- **直连存储（不依赖 sidecar）**：`cmd/srm-mcp` 经 storefactory 直接打开**与 Tauri
+  桌面版同一个** SQLite 库——默认数据目录按 Tauri identifier `com.supplider.desktop`
+  解析（Linux `$XDG_DATA_HOME`/`~/.local/share`；macOS `~/Library/Application Support`；
+  Windows `%APPDATA%`），可用 `--data-dir`/`SRM_DATA_DIR` 覆盖。WAL 下可与运行中的
+  桌面 App 并发读写；App 关闭时 MCP 仍独立工作。无网络/无 Key/无外部服务。
+- **Tools（7 个）**：`search_suppliers`（中文 FTS/拼音/同义词 + 地域/品类/资质/评分
+  筛选，q 空即列首页）、`get_supplier`、`add_supplier`（必填公司名/省/市，录入即跑
+  空壳检测不阻断）、`shell_risk_queue`、`supplier_risk`、`expiring_qualifications`、
+  `compare_suppliers`；均带中文 description + JSON-Schema 入参。
+- **Resources**：静态 `supplider://suppliers`、`supplider://risk/shell`、
+  `supplider://reminders/expiring`；模板 `supplider://supplier/{id}`。
+- **Prompts**：`supplier-due-diligence`（query=id/公司名）——尽调流程提示。
+- **Skill 文件**：`docs/mcp/supplider-skill.md`（frontmatter + 工具表/资源/工作流/
+  输出约定），供外部 Agent 读取。
+- 测试：`mcp/server_test.go` 用 memory store 跑完整 JSON-RPC 会话（能力宣告 / 7 工具
+  / add 干净+风险两家 / search 命中 / shell 队列只含风险家 / resources / prompts /
+  缺失 id 回 isError / 未知方法 -32601 / notification 不回包）。默认 + personal 全量
+  `go test` 全绿，enterprise/personal 编译通过。
+- E2E（真实 stdio 二进制 + fresh SQLite）：initialize/notification/add(干净→无风险，
+  风险→R103+R202)/search 命中/shell 队列仅风险家/resources 读到 2 家；二次启动重开
+  同库数据仍在；二进制约 12MB，stderr 仅日志。
+
 
 ### 2026-09-08：空壳检测人工审核闭环——生命周期"审核"人在回路
 
