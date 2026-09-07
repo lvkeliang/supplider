@@ -10,8 +10,9 @@
 - [x] **SQLite + JSON1/JSONB 存储适配器**（`internal/datamodel/sqlite`，personal + small-business 共用）：文档经 `jsonb(?)` 存 JSONB BLOB 列、`json(doc)` 读回；过滤/排序/游标字段反范式为类型化列（province/city/district/rating/qual_rank/owner/status/visibility/时间戳）+ `supplier_categories` 品类边表（EXISTS OR 语义）；WAL 模式、busy_timeout、外键级联；关键字走 `search_text` LIKE（ESCAPE 处理 %/_）与 memory 语义对齐。无 build tag（适配器属基础设施层，允许全 tier 编译），由 storefactory 按 tag 接线
 - [ ] **供应商文档模型**：按 PRD 样例实现 `Supplier` 结构 —— `basic_info`（公司名/信用代码/法人/注册资本/成立日期/经营范围/省市区地域）、`qualifications[]`、`categories[]`、`products_services[]`、`performance_history[]`、`risk_flags`、`visibility`、`owner`、`shared_with`、`custom_fields`（自由扩展）、`change_log[]`、`attachments[]`；ID 规则 `sup_2026_000xxx`
 - [ ] **供应商 CRUD API**（Go 后端 HTTP/gRPC）：创建、读取、更新（自动写 change_log：字段/旧值/新值/时间/来源）、删除（归档语义）、列表
-- [ ] **手动录入表单（前端）**：核心字段表单 + 动态自定义字段添加（不预定义字段名/类型）
-- [ ] **供应商详情页"文档卡片"UI**：基本信息/资质/产品服务/绩效/自定义字段各为独立可折叠卡片；自定义字段区域支持动态增删
+- [x] **手动录入表单（前端）**：`frontend/`（Vite + React 18 + TS + Tailwind）；核心字段表单 + 动态资质/产品/绩效行 + 动态自定义字段（字段名 + 类型 文本/数字/布尔，不预定义）；可见性选择按 `features.visibility_levels` 门控；create POST / edit PATCH（服务端 diff 自动写 change_log）——2026-09-07
+- [x] **供应商详情页"文档卡片"UI**：基本信息/资质/品类/产品服务/绩效/自定义字段/附件/变更记录各为独立可折叠 `DocumentCard`；自定义字段泛化渲染；风险标记横幅；归档/恢复/编辑操作；列表摘要卡 + 关键词搜索 + 地域/品类/资质/评分筛选 + 游标"加载更多"（列表只取 summary 字段）——2026-09-07
+- [ ] **Monorepo 前端骨架（部分完成）**：`frontend/` 已就位（dev 走 Vite 代理 /api→127.0.0.1:7612；产物 dist/ ~55KB gzip）；**待办**：Tauri 2.0 `desktop/` Rust 壳（需安装 Rust 工具链，本机暂无 cargo）——sidecar 自动拉起 + 内嵌 dist/ + 打包 Win/macOS/Linux；**Tauri 接入前需给 Go HTTP 层加 localhost CORS**（Tauri origin `tauri://localhost` 直连 sidecar）
 - [ ] **附件管理**：本地文件系统存储（用户目录下 `attachments/`），上传/下载/列表；单文件 ≤50MB 限制
 - [ ] **Excel 批量导入**：模板下载、上传解析、列映射（先做手动映射 UI，AI 映射后置）、校验报错行报告、批量写入（1000 条 <3s）
 - [ ] **基础全文搜索**：内嵌 Meilisearch（或先用 SQLite FTS5 过渡，搜索接口不变）；中文分词、模糊匹配、拼音、同义词；搜索结果缓存 5 分钟；响应 <200ms
@@ -71,8 +72,11 @@
 - [x] Project initialization（Ralph 脚手架、PRD 转换完成）
 - [x] Backend monorepo 骨架：Go module、build tag 三 tier 接线（storefactory/tier/featureflag）、domain 文档模型、supplier service（change_log diff、评分聚合、归档/恢复）、HTTP API、srm-cli 雏形、memory 参考适配器
 - [x] DataModel 接口 + contract 契约套件 + SQLite JSONB 适配器（personal/small-business 已接线；enterprise 占位待 Mongo）——2026-09-07
+- [x] 前端（React+TS+Tailwind/Vite）：列表搜索筛选 + 游标分页、手动录入/编辑表单（动态自定义字段）、文档卡片详情页；AI 入口按 /features 隐藏——2026-09-07
 
 ## Notes
+- **前端架构要点**：前端不引入 react-router 等重依赖，用 App 内 `View` 联合状态做三屏路由（list/new/detail/edit）；`src/api.ts` 是唯一发 fetch 的地方，业务/UI 只调类型化函数；`types.ts` 是 Go domain 的 TS 投影（以后端 JSON tag 为准）。dev 用 Vite proxy 同源转发 sidecar；Tauri 生产构建用 `VITE_API_BASE=http://127.0.0.1:7612` 直连。AI 入口（OCR/文档搜索/NL/Excel 智能映射）本轮不渲染，靠 `features.ai_*` 为 false 自动隐藏——无 Key 即无 AI 入口
+- **下一轮候选（按 MVP 闭环）**：① 附件本地 FS 上传（objectstore/localfs 已有端口，需 HTTP multipart + ≤50MB 校验 + 前端附件区）；② Excel 批量导入（Go excelize + 手动列映射 UI + 校验报错行）；③ 导出 JSON/Excel + srm-cli export/compare 补齐；④ 数据模型目前全端内存 filter/关键字，搜索质量下一步用 SQLite FTS5 落地（featureflag 已标 fts5）；⑤ Tauri 壳（装 Rust 后）
 - **SQLite 驱动选型（已定）**：用 `modernc.org/sqlite`（纯 Go、无 cgo）而非 `mattn/go-sqlite3`（cgo）——Tauri sidecar 需交叉编译 Win/macOS/Linux 单二进制，cgo 要求目标平台 C 工具链，与"零依赖双击安装"冲突。modernc v1.58 内含 SQLite 3.51，原生支持 JSONB。代价：go directive 升至 1.25（工具链自动下载），二进制略大（可接受，~15MB 目标仍可达）。驱动只允许出现在 `datamodel/sqlite` 适配器包内
 - **SQLite 适配器设计要点**：① `doc BLOB` 列用 `jsonb(?)` 写入、`json(doc)` 读回，custom_fields 等自由结构免迁移；② 过滤/排序字段反范式成类型化列 + 索引，比 `json_extract` 谓词简单且快，json_extract 留给 ad-hoc custom_fields 查询；③ 品类用 `supplier_categories` WITHOUT ROWID 边表 + EXISTS 实现 OR 语义；④ 游标分页是 `(sort_col, id)` 元组比较（`col < ? OR (col = ? AND id < ?)`），rating 游标键在绑定参数时转回 float；⑤ `:memory:` DSN 每连接独立库，必须 `SetMaxOpenConns(1)`；⑥ 文件库用 WAL + busy_timeout(5000) + foreign_keys
 - **适配器不打 build tag**：`datamodel/sqlite` 包无 tag（基础设施层允许任意 tier 编译），差异只在 storefactory 的 `tier_*.go` 接线文件；contract 套件因此 `go test ./...` 无 tag 也能覆盖 SQLite
