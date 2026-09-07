@@ -1,0 +1,29 @@
+[package]
+name = "supplider-desktop"
+version = "0.1.0"
+description = "Supplider — 供应商资源管理平台 (personal desktop tier)"
+authors = ["Supplider"]
+edition = "2021"
+rust-version = "1.77"
+
+# The desktop shell contains NO business logic: it launches the Go
+# sidecar (suppliderd), waits for readiness, and tears it down on exit.
+# All supplier/search/import logic lives in the Go binary built by
+# scripts/build-sidecar.sh.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Readiness polling only (GET /readyz). rustls => no system OpenSSL dep,
+# keeping the desktop build self-contained.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[features]
+# This feature is used for production builds or when a dev server is not specified.
+# DO NOT REMOVE!! (Tauri convention: `tauri build` sets it.)
+custom-protocol = ["tauri/custom-protocol"]

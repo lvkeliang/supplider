@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Supplider · 前端未构建</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: #f1f5f9; color: #1e293b;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, .08);
+    max-width: 560px; width: 100%; padding: 36px 40px;
+  }
+  .logo { font-size: 22px; font-weight: 700; color: #1d4ed8; margin-bottom: 18px; }
+  h1 { font-size: 17px; margin-bottom: 10px; }
+  p { font-size: 14px; line-height: 1.7; color: #475569; margin-bottom: 12px; }
+  code {
+    background: #eff6ff; color: #1e40af; border-radius: 4px;
+    padding: 1px 6px; font-size: 13px;
+  }
+  .ok { margin-top: 18px; padding-top: 16px; border-top: 1px dashed #e2e8f0; font-size: 13px; color: #64748b; }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Supplider 供应商资源管理</div>
+    <h1>前端界面尚未构建</h1>
+    <p>
+      你正在直接运行后端二进制 <code>suppliderd</code>，但前端资源包
+      （<code>backend/internal/webui/dist</code>）没有同步进来——全新克隆的代码库
+      只带这个占位页，以保证 <code>go build</code> 无需 Node 工具链即可通过。
+    </p>
+    <p>
+      构建并内嵌前端界面：<br />
+      <code>scripts/build-frontend.sh</code>　然后重新 <code>go build -tags personal ./cmd/suppliderd</code>
+    </p>
+    <p>
+      桌面版（Tauri）无需手动构建：<code>tauri build</code> 会自动执行
+      <code>npm run build</code> 并把界面打进安装包。
+    </p>
+    <div class="ok">
+      JSON API 不受影响，可正常使用：<a href="/readyz">/readyz</a> ·
+      <a href="/api/v1/features">/api/v1/features</a> ·
+      <code>srm-cli</code> 命令行。
+    </div>
+  </div>
+</body>
+</html>

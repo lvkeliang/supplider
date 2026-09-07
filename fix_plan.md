@@ -5,14 +5,45 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 下一步优先级（个人版 MVP）
 
-1. **前端搜索接入（最高优先）**：后端 FTS 已就绪（中文 trigram 子串 / 拼音 / 同义词 / 短词 LIKE 回退 / 多维筛选 AND），
-   但前端列表页的搜索框需确认已走 `GET /api/v1/suppliers?q=...` 并展示摘要卡片；筛选栏（地域/品类/资质/评分）接线。
-2. **Tauri 2.0 shell**：Go sidecar（`suppliderd -tags personal`）由 Tauri 自动拉起，双击即用；安装包体积验证（目标 ~15MB）。
+1. **资质到期提醒（90/30/7 天）**：纯业务逻辑，无需新基础设施——supplier service 加
+   `ExpiringQualifications(days []int)` 扫描 + CLI `srm-cli expiring` + 前端列表页提醒横幅；
+   工商变更监控留 [AI]/API 占位，先有非 AI 的手动到期扫描。
+2. **Tauri 安装包真机验证**：shell 代码与 sidecar 已完成并通过 HTTP 层 E2E（见下），
+   但本机无 Rust 工具链，未跑过 `tauri build`；需在有 Rust 的机器执行
+   `scripts/build-sidecar.sh && cd src-tauri && tauri build`，验证安装包体积（目标 ~15MB）
+   与双击拉起 sidecar。图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。
 3. **Meilisearch 内嵌适配器**：实现 `search.Index` 接口替换 SQLite FTS5（当前 FTS 是过渡方案，行为已被测试钉住，可直接对照）。
-4. 资质到期提醒（90/30/7 天）、工商变更监控占位（[AI]/API 层，先有非 AI 的手动到期扫描）。
-5. 可见性策略收紧流程（个人版只需 0/1 两级的数据处置骨架）。
+4. 可见性策略收紧流程（个人版只需 0/1 两级的数据处置骨架）。
+5. MCP 暴露（srm-cli 已有 search/add/list/info/export/compare，包一层 MCP Tools/Resources）。
 
 ## 已完成
+
+### 2026-09-08：Tauri 2.0 桌面 shell + 单二进制 Web 模式（sidecar 打包落地）
+
+- **Tauri shell（`src-tauri/`）**：纯基础设施层，零业务逻辑。Rust 侧启动时
+  `tauri_plugin_shell` 拉起 Go sidecar（`--addr 127.0.0.1:7612 --data-dir <app_data_dir>`），
+  轮询 `/readyz` 最多 20s，退出时 kill 子进程（无孤儿守护）；sidecar 日志转发 Tauri 控制台。
+  capabilities 只开 sidecar spawn/execute/kill，数据访问全走 HTTP。
+- **单二进制 Web 模式**：`internal/webui` 用 `//go:embed all:dist` 把前端构建产物嵌进
+  suppliderd，`httpapi.MountWebUI` 挂在 `/`（/api、/readyz 更具体的 pattern 优先）；
+  非资源路径回退 index.html（SPA），缺失的 /assets/* 仍 404。双击/命令行直接跑 sidecar，
+  浏览器开 127.0.0.1:7612 即得完整平台。
+- **CORS**：`httpapi.CORS` 仅放行 Tauri 固定 origin（tauri://localhost、tauri.localhost）
+  与 loopback 开发服务器；预检 OPTIONS 直接 204，无 Origin 头（同源/反代）零影响。
+- **打包脚本**：`scripts/build-frontend.sh`（npm build 并同步 dist 到 frontend/dist 与
+  webui/dist 两处）、`scripts/build-sidecar.sh`（CGO_ENABLED=0 纯 Go 交叉编译 5 个目标
+  triple，-ldflags="-s -w" 剥符号，linux 二进制 ~16MB）。
+- **fresh-clone 安全**：dist/ 只跟踪 `.gitkeep`（go:embed 要求目录存在）；无构建产物时
+  `webui.Dist()` 返回内置 placeholder.html（"前端未构建"引导页，fstest.MapFS），API 不受影响。
+  已用 /tmp 最小模块模拟验证：仅含 .gitkeep 的 dist 可编译并返回占位页 200。
+- **E2E 验证（-tags personal，真实 HTTP）**：/readyz、/features（tier=personal/sqlite/fts5/
+  localfs/ai=false）；创建 3 家供应商后 FTS 全通过——trigram 子串（"州一建有"）、全拼
+  （hangzhouyijian）、首字母（hzyj）、同义词（搜"商砼"命中写"商品混凝土"的文档）、短词
+  LIKE（"水泥"）、城市+关键词 AND、评分筛选（rating 由 performance_history 聚合，
+  不可直接写入——4.5/5.0 两条 → 4.75）；嵌入式 UI 200 + assets MIME 正确 + SPA 回退 +
+  非法 origin 无 CORS 头；JSON 导出正常。
+- **前端搜索接线确认**：`SupplierList.tsx` 早已走 `GET /api/v1/suppliers?q=...` 并展示摘要
+  卡片，筛选栏（省/市/品类/资质等级/最低评分/含归档）与游标分页齐备——上轮计划项 #1 关闭。
 
 ### 2026-09-07：SQLite FTS5 搜索引擎（个人版搜索层落地）
 

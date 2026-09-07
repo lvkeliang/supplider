@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Supplider main window: the frontend only needs sidecar process lifecycle (spawn/kill). All data access goes through the Go sidecar over HTTP.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [{ "name": "binaries/suppliderd", "sidecar": true }]
+    },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [{ "name": "binaries/suppliderd", "sidecar": true }]
+    },
+    "shell:allow-kill"
+  ]
+}

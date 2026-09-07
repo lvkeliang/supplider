@@ -22,6 +22,7 @@ import (
 	"github.com/supplider/supplider/backend/internal/storefactory"
 	"github.com/supplider/supplider/backend/internal/supplier"
 	"github.com/supplider/supplider/backend/internal/tier"
+	"github.com/supplider/supplider/backend/internal/webui"
 )
 
 func main() {
@@ -48,9 +49,18 @@ func main() {
 	// configured (MVP ships without AI keys — all AI entries hidden).
 	feats := featureflag.Default().WithAIState(false)
 
+	// Single binary serves API + embedded UI. CORS lets the Tauri webview
+	// (tauri://localhost / tauri.localhost) call the loopback sidecar.
+	handler := httpapi.CORS(
+		httpapi.New(svc, feats).
+			WithObjects(objects).
+			MountWebUI(webui.Dist()).
+			Mux,
+	)
+
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           httpapi.New(svc, feats).WithObjects(objects).Mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

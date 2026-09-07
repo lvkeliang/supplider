@@ -1,0 +1,10 @@
+# Rust/Tauri build output
+/target
+/gen/schemas
+**/*.rs.bk
+Cargo.lock
+
+# Go sidecar binaries (produced by scripts/build-sidecar.sh; named with
+# the Rust target triple, e.g. suppliderd-x86_64-pc-windows-msvc.exe)
+/binaries/*
+!/binaries/.gitkeep

@@ -45,3 +45,10 @@ target/
 
 # Ralph backup directories (created by migration)
 .ralph_backup_*
+
+# Embedded frontend bundle synced from frontend/dist (see scripts/build-frontend.sh).
+# Only .gitkeep is tracked so a fresh clone still compiles (//go:embed needs
+# the dir to exist); webui.Dist() serves placeholder.html until a real
+# bundle is built and synced.
+backend/internal/webui/dist/*
+!backend/internal/webui/dist/.gitkeep
