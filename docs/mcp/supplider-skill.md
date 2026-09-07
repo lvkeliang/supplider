@@ -40,6 +40,7 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 | `supplier_risk` | 某供应商的空壳检测逐条信号（规则代码 + 中文解释） | `id` |
 | `expiring_qualifications` | 资质到期提醒（已过期 / 90/30/7 天窗口），按紧迫度排序 | `within`（默认 90） |
 | `compare_suppliers` | 多家供应商并排对比（地域/品类/最高资质/评分/绩效/风险） | `ids[]`（≥2） |
+| `blacklist_supplier` | 淘汰阶段：列入黑名单（`remove:false` + `reason`，仍可搜到但醒目标记禁用）或移出（`remove:true`） | `id`, `reason?`, `remove?` |
 
 供应商 id 形如 `sup_2026_XXXXXX`，由 `search_suppliers` / `add_supplier` 返回。
 
@@ -64,7 +65,8 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 3. **合作前尽调**：调用 `supplier_risk`（或直接用 `supplier-due-diligence`
    prompt），并结合 `expiring_qualifications` 确认资质未过期/临期。
    - 高严重度信号（如信用代码校验位不符 R103）必须提示用户人工核验原件。
-   - 空壳风险**不自动否决**——它只是审核线索；最终判断在用户。
+   - 空壳风险**不自动否决**——它只是审核线索；最终判断在用户。经用户确认属实的，
+     可由用户决定后调用 `blacklist_supplier`（你不应擅自拉黑，需用户明确指示）。
 4. **比价选型**：对 2 家以上候选调用 `compare_suppliers`，结合评分/资质/风险给
    出推荐排序，并说明理由。
 5. **录入新供应商**：信息不全也可 `add_supplier`（资料简陋会触发提示性信号，

@@ -17,6 +17,8 @@
 //	srm-cli risk [id] [--json]               空壳特征检测：无 id 列审核队列，带 id 看该供应商信号
 //	srm-cli review <id> [--dismiss] [--by user] [--note ...]
 //	                                         人工审核闭环：标记已核验(默认)或误报忽略，清出审核队列
+//	srm-cli blacklist <id> [--reason ...] / srm-cli unblacklist <id>
+//	                                         黑名单（淘汰/禁用）：列入仍可搜到但醒目标记，移出恢复在库
 //
 // Shared [filters]: --province --city --district --category --min-qual
 // --min-rating --owner --q.
@@ -68,6 +70,10 @@ func main() {
 		err = cmdRisk(args)
 	case "review":
 		err = cmdReview(args)
+	case "blacklist":
+		err = cmdBlacklist(args, true)
+	case "unblacklist":
+		err = cmdBlacklist(args, false)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -100,6 +106,9 @@ Usage:
   srm-cli review <id> [--dismiss] [--by 用户] [--note 备注]
                                  人工审核闭环：默认标记"已核验"，--dismiss 标记"误报忽略"；
                                  审核后清出风险队列，资料再变更会自动重新进入队列
+  srm-cli blacklist <id> [--reason 原因]
+                                 列入黑名单（淘汰/禁用，仍可搜到但醒目标记）
+  srm-cli unblacklist <id>       移出黑名单，恢复在库
 
 Filters (shared by list/search/export):
   --province 省  --city 市  --district 区县  --category 品类(逗号分隔, OR)
@@ -344,6 +353,13 @@ func printSupplier(s *domain.Supplier) {
 	b := s.BasicInfo
 	fmt.Printf("%s  [%s]  %.2f★\n", s.ID, s.Status, s.Rating)
 	fmt.Printf("  名称:   %s\n", b.CompanyName)
+	if s.Status == "blacklisted" {
+		reason := s.BlacklistReason
+		if reason == "" {
+			reason = "(未填原因)"
+		}
+		fmt.Printf("  ⚠ 黑名单：%s\n", reason)
+	}
 	if b.CreditCode != "" {
 		fmt.Printf("  信用代码: %s\n", b.CreditCode)
 	}
@@ -853,6 +869,55 @@ func riskSeverityTag(sev string) string {
 	default:
 		return "· 低"
 	}
+}
+
+// ---------- blacklist (黑名单 / 淘汰) ----------
+
+// cmdBlacklist adds (add=true) or removes (add=false) a supplier on the
+// blacklist. Blacklisted suppliers stay visible in list/search but are
+// badged as do-not-use. Mirrors POST .../blacklist and .../unblacklist.
+func cmdBlacklist(args []string, add bool) error {
+	fs := flag.NewFlagSet("blacklist", flag.ContinueOnError)
+	reason := fs.String("reason", "", "blacklist reason (e.g. 资质造假/严重违约)")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		return fmt.Errorf("blacklist requires a supplier id")
+	}
+	id := fs.Arg(0)
+	path := "/unblacklist"
+	var body io.Reader
+	if add {
+		path = "/blacklist"
+		b, _ := json.Marshal(map[string]string{"reason": *reason})
+		body = bytes.NewReader(b)
+	} else {
+		body = bytes.NewReader([]byte("{}"))
+	}
+	resp, err := http.Post(
+		apiBase()+"/api/v1/suppliers/"+url.PathEscape(id)+path,
+		"application/json", body)
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var doc domain.Supplier
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return err
+	}
+	if add {
+		fmt.Printf("blacklisted %s  %s → 已列入黑名单（淘汰/禁用）。\n", doc.ID, doc.BasicInfo.CompanyName)
+		if doc.BlacklistReason != "" {
+			fmt.Printf("  原因: %s\n", doc.BlacklistReason)
+		}
+	} else {
+		fmt.Printf("unblacklisted %s  %s → 已移出黑名单，恢复在库。\n", doc.ID, doc.BasicInfo.CompanyName)
+	}
+	return nil
 }
 
 // ---------- review (人工审核闭环) ----------

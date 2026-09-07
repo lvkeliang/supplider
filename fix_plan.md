@@ -17,12 +17,45 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    之后，行为被测试钉住）；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）
    实现同一接口，届时照 FTS5 测试对照即可。
 4. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
-   保留不被引擎覆盖）；`confirmed_risk → 黑名单`联动可在淘汰阶段做。
+   保留不被引擎覆盖）。黑名单生命周期已落地（见下）；外部数据"被执行人→自动预警"可后挂。
 
 5. srm-mcp 打包/分发：`go build -tags personal` 已出独立 stdio 二进制约 12MB，后续
    可纳入 scripts 构建/发布产物，随桌面版分发或单独提供（MCP 主机配置 command 即 srm-mcp）。
 
 ## 已完成
+
+### 2026-09-08：黑名单生命周期（淘汰/禁用）——生命周期"淘汰"闭环落地
+
+补齐生命周期最后一环：`domain.StatusBlacklisted` 常量本已存在但无入口，本环把"黑名单"
+做成与归档并列的状态操作。黑名单是**可见的禁用警告**（确认造假/严重违约的供应商不应被
+误选），与归档语义不同——归档是安静删除（默认列表隐藏），黑名单仍出现在列表/搜索但
+醒目标记。纯本地，无 AI。
+
+- **数据模型**（`domain`）：Supplier 加 `BlacklistReason`（列入原因，移出时清空；
+  列入时间/操作人走 change_log）。黑名单原因外的审计信息全在变更记录。
+- **服务层**（`internal/supplier/blacklist.go`）：
+  - `Blacklist(id, reason)`：status=blacklisted，用 **Put**（不是 store.Delete——Delete
+    强制归档），写 `status` 与 `blacklist_reason` 两条 change_log；已归档需先恢复
+    （报错含 "must be restored"→HTTP 400）；已在黑名单→幂等 no-op。
+  - `Unblacklist(id)`：status 回 active、清原因、写 change_log；非黑名单→no-op。
+  - 适配器无需改：黑名单文档整体以 JSONB 持久化；默认列表只隐藏 archived，所以黑名单
+    仍可见，`?status=blacklisted` 可单独筛出（memory/sqlite 的 Status 过滤本就支持）。
+- **API**：`POST /suppliers/{id}/blacklist`（body `{reason}` 或 `?reason=`）、
+  `POST /suppliers/{id}/unblacklist`，均返回更新后文档。
+- **CLI**：`srm-cli blacklist <id> [--reason 原因]`、`srm-cli unblacklist <id>`；
+  `srm-cli info` 头部 `[blacklisted]` + ⚠ 黑名单原因行。
+- **MCP**：新增 `blacklist_supplier` 工具（`id`/`reason?`/`remove?`，remove=true 移出）；
+  Skill 文档同步（并注明 Agent 不擅自拉黑，需用户明确指示）。
+- **前端**：列表卡片黑名单供应商显示红底白字 `🚫 黑名单` 徽标（优先于风险标）；详情页
+  顶部红色横幅"已列入黑名单（淘汰/禁用），请勿选用"+原因；头部按钮：在库显示
+  `🚫 列入黑名单`（弹 prompt 填原因）+归档，黑名单显示`移出黑名单`，归档显示`恢复`。
+- 测试：`supplier/blacklist_test.go` 3 例——列入(状态+原因+change_log)后**默认列表仍
+  可见**且 `status=blacklisted` 可筛出、移出回 active 清原因；归档供应商列入被拒；
+  重复列入/对非黑名单移出均幂等。全量 `go test` 默认+personal 全绿，enterprise/personal
+  编译通过；前端 tsc+vite 通过。
+- E2E：HTTP 列入（status/reason 正确）→列表仍可见→status 过滤命中→CLI info 显示黑名单
+  →CLI 移出回 active；MCP stdio `blacklist_supplier` 写入**与运行中 sidecar 共享的
+  SQLite**（WAL 多进程），HTTP 复核状态/原因已更新。
 
 ### 2026-09-08：MCP 开放接入（Tools / Resources / Prompts + Skill 文件）
 

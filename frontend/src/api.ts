@@ -149,6 +149,12 @@ export const api = {
   restoreSupplier: (id: string) =>
     request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/restore`),
 
+  // 黑名单（淘汰/禁用）：列入后仍可搜到但醒目标记；移出恢复在库。
+  blacklistSupplier: (id: string, reason: string) =>
+    request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/blacklist`, { reason }),
+  unblacklistSupplier: (id: string) =>
+    request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/unblacklist`),
+
   // Upload an attachment (multipart). Returns the updated supplier document.
   // The hard limit is 50MB (enforced server-side; 413 on overflow).
   uploadAttachment: async (id: string, file: File): Promise<Supplier> => {

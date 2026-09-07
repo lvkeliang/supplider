@@ -71,6 +71,12 @@ type Supplier struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+
+	// BlacklistReason records why a supplier was moved to the blacklist
+	// (status=blacklisted, 淘汰阶段): e.g. confirmed fraud, serious breach.
+	// Cleared when the supplier is removed from the blacklist. The date and
+	// actor are in change_log.
+	BlacklistReason string `json:"blacklist_reason,omitempty"`
 }
 
 // BasicInfo is the fixed core of every supplier.

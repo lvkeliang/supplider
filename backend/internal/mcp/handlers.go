@@ -49,6 +49,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		text, ferr = s.toolSupplierRisk(ctx, args)
 	case "compare_suppliers":
 		text, ferr = s.toolCompare(ctx, args)
+	case "blacklist_supplier":
+		text, ferr = s.toolBlacklist(ctx, args)
 	default:
 		return nil, &rpcError{Code: errMethodNotFound, Message: "unknown tool: " + p.Name}
 	}
@@ -272,6 +274,36 @@ func (s *Server) toolCompare(ctx context.Context, args json.RawMessage) (string,
 		})
 	}
 	return "供应商对比：\n" + pretty(rows), nil
+}
+
+func (s *Server) toolBlacklist(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		ID     string `json:"id"`
+		Reason string `json:"reason"`
+		Remove bool   `json:"remove"`
+	}
+	decodeArgs(args, &a)
+	if strings.TrimSpace(a.ID) == "" {
+		return "", fmt.Errorf("id is required")
+	}
+	id := strings.TrimSpace(a.ID)
+	if a.Remove {
+		doc, err := s.svc.Unblacklist(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已将 %s（%s）移出黑名单，恢复在库。", doc.ID, doc.BasicInfo.CompanyName), nil
+	}
+	doc, err := s.svc.Blacklist(ctx, id, a.Reason)
+	if err != nil {
+		return "", err
+	}
+	reason := doc.BlacklistReason
+	if reason == "" {
+		reason = "(未填原因)"
+	}
+	return fmt.Sprintf("已将 %s（%s）列入黑名单：%s。该供应商仍可被搜到但会醒目标记为禁用。",
+		doc.ID, doc.BasicInfo.CompanyName, reason), nil
 }
 
 // ---- resources ----

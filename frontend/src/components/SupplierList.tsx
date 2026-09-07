@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type ListParams } from '../api'
 import type { ExpiringReport, ShellRiskReport, SupplierSummary } from '../types'
-import { QUAL_LEVELS, STATUS_ARCHIVED } from '../types'
+import { QUAL_LEVELS, STATUS_ARCHIVED, STATUS_BLACKLISTED } from '../types'
 import type { Go } from '../App'
 
 /** Chinese tag + tailwind classes for one risk severity. */
@@ -290,6 +290,11 @@ export function SupplierList({ go }: { go: Go }) {
           >
             <div className="flex items-center gap-2">
               <span className="font-medium text-slate-800">{s.name}</span>
+              {s.status === STATUS_BLACKLISTED && (
+                <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white" title="黑名单（淘汰/禁用），请勿选用">
+                  🚫 黑名单
+                </span>
+              )}
               {s.shell_risk && !s.risk_reviewed && (
                 <span
                   className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700"

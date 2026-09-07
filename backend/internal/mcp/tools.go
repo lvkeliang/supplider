@@ -116,6 +116,15 @@ func toolDefs() []map[string]any {
 			}, "id"),
 		},
 		{
+			"name":        "blacklist_supplier",
+			"description": "淘汰阶段：把供应商列入黑名单（确认造假/严重违约等，仍可搜到但醒目标记为禁用），或从黑名单移出。这是人工生命周期操作，会写入变更记录。",
+			"inputSchema": schema(map[string]any{
+				"id":     strProp("供应商 id"),
+				"reason": strProp("列入原因，如 资质造假/严重违约（移出时可省略）"),
+				"remove": map[string]any{"type": "boolean", "description": "true 表示移出黑名单（恢复在库），默认 false=列入"},
+			}, "id"),
+		},
+		{
 			"name":        "compare_suppliers",
 			"description": "并排对比多家供应商：地域/品类/最高资质/评分/绩效均分/价格区间/风险/状态，辅助比价选型。",
 			"inputSchema": schema(map[string]any{

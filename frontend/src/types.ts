@@ -98,6 +98,7 @@ export interface Supplier {
   change_log?: ChangeEntry[]
   attachments?: Attachment[]
   rating?: number
+  blacklist_reason?: string
   created_at: string
   updated_at: string
   archived_at?: string

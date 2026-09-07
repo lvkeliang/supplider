@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, apiUrl } from '../api'
 import type { RiskReport, RiskSignal, Supplier } from '../types'
-import { STATUS_ARCHIVED, VIS_LABELS } from '../types'
+import { STATUS_ARCHIVED, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import { DocumentCard, Field } from './Card'
 import type { Go } from '../App'
 
@@ -101,6 +101,36 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     }
   }
 
+  // 黑名单（淘汰/禁用）：列入仍可搜到但醒目标记，防止误选；移出恢复在库。
+  const blacklist = async () => {
+    const reason = prompt('列入黑名单的原因（如：资质造假 / 严重违约 / 恶意失信）：')
+    if (reason === null) return // cancelled
+    setBusy(true)
+    setError('')
+    try {
+      await api.blacklistSupplier(id, reason.trim())
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const unblacklist = async () => {
+    if (!confirm('确定将该供应商移出黑名单、恢复在库？')) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.unblacklistSupplier(id)
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const MAX_ATTACH = 50 * 1024 * 1024
   const uploadFile = async (file: File) => {
     if (file.size > MAX_ATTACH) {
@@ -124,6 +154,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
 
   const b = doc.basic_info
   const archived = doc.status === STATUS_ARCHIVED
+  const blacklisted = doc.status === STATUS_BLACKLISTED
   const customEntries = Object.entries(doc.custom_fields ?? {})
 
   return (
@@ -144,17 +175,32 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
             <span className="ml-3">{VIS_LABELS[doc.visibility] ?? `等级${doc.visibility}`}</span>
           </div>
         </div>
-        <div className="ml-auto flex gap-2">
-          {!archived ? (
+        <div className="ml-auto flex flex-wrap gap-2">
+          {archived ? (
+            <button className="btn-primary" disabled={busy} onClick={restore}>恢复</button>
+          ) : (
             <>
               <button className="btn-ghost" onClick={() => go({ name: 'edit', id })}>编辑</button>
-              <button className="btn-danger" disabled={busy} onClick={archive}>归档</button>
+              {blacklisted ? (
+                <button className="btn-primary" disabled={busy} onClick={unblacklist}>移出黑名单</button>
+              ) : (
+                <>
+                  <button className="btn-ghost" disabled={busy} onClick={blacklist} title="列入黑名单（淘汰/禁用）：仍可搜到但醒目标记">🚫 列入黑名单</button>
+                  <button className="btn-danger" disabled={busy} onClick={archive}>归档</button>
+                </>
+              )}
             </>
-          ) : (
-            <button className="btn-primary" disabled={busy} onClick={restore}>恢复</button>
           )}
         </div>
       </div>
+
+      {/* 黑名单横幅（淘汰/禁用） */}
+      {blacklisted && (
+        <div className="rounded-lg border border-red-600 bg-red-600 px-4 py-2 text-sm font-medium text-white">
+          🚫 该供应商已列入黑名单（淘汰/禁用），请勿选用。
+          {doc.blacklist_reason ? <span className="ml-1 font-normal">原因：{doc.blacklist_reason}</span> : null}
+        </div>
+      )}
 
       {/* 风险检测：本地规则引擎（非 AI）+ 高版本外部信号 + 人工审核闭环。
           无信号则不显示。 */}

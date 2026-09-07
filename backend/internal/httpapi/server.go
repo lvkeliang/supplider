@@ -12,6 +12,8 @@
 //	PATCH  /api/v1/suppliers/{id}      partial update (auto change_log)
 //	DELETE /api/v1/suppliers/{id}      archive
 //	POST   /api/v1/suppliers/{id}/restore
+//	POST   /api/v1/suppliers/{id}/blacklist      add to blacklist (淘汰/黑名单)
+//	POST   /api/v1/suppliers/{id}/unblacklist    remove from blacklist
 //	GET    /api/v1/suppliers/{id}/risk          live shell-company rule report
 //	POST   /api/v1/suppliers/{id}/risk-check    re-run rules + persist verdict
 //	POST   /api/v1/suppliers/{id}/risk-review   human resolves flag (verified|dismissed)
@@ -82,6 +84,8 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("PATCH /api/v1/suppliers/{id}", s.handleUpdate)
 	s.Mux.HandleFunc("DELETE /api/v1/suppliers/{id}", s.handleArchive)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/restore", s.handleRestore)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/blacklist", s.handleBlacklist)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/unblacklist", s.handleUnblacklist)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/{id}/risk", s.handleSupplierRisk)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-check", s.handleRiskCheck)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-review", s.handleRiskReview)
@@ -204,6 +208,37 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	doc, err := s.Service.Restore(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+// handleBlacklist moves a supplier onto the blacklist (淘汰/黑名单). Body is
+// optional: {"reason": "..."}; the reason may also come from ?reason=. The
+// supplier stays visible (in list/search) but badged as do-not-use.
+func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
+	reason := r.URL.Query().Get("reason")
+	if r.Body != nil {
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
+		if strings.TrimSpace(body.Reason) != "" {
+			reason = body.Reason
+		}
+	}
+	doc, err := s.Service.Blacklist(r.Context(), r.PathValue("id"), reason)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (s *Server) handleUnblacklist(w http.ResponseWriter, r *http.Request) {
+	doc, err := s.Service.Unblacklist(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
