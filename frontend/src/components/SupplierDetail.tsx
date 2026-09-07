@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api'
+import { api, apiUrl } from '../api'
 import type { Supplier } from '../types'
 import { STATUS_ARCHIVED, VIS_LABELS } from '../types'
 import { DocumentCard, Field } from './Card'
@@ -14,6 +14,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
   const [doc, setDoc] = useState<Supplier | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   const load = useCallback(() => {
     api
@@ -46,6 +47,24 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const MAX_ATTACH = 50 * 1024 * 1024
+  const uploadFile = async (file: File) => {
+    if (file.size > MAX_ATTACH) {
+      setError(`附件 ${file.name} 超过 50MB 限制`)
+      return
+    }
+    setUploading(true)
+    setError('')
+    try {
+      await api.uploadAttachment(id, file)
+      load() // refresh so the new attachment appears
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -186,11 +205,38 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
 
       {/* 附件 */}
       <DocumentCard title="附件" count={doc.attachments?.length ?? 0} defaultOpen={false}>
-        {(doc.attachments?.length ?? 0) === 0 ? <Empty text="暂无附件（附件上传将在后续版本开放）" /> : (
+        {!archived && (
+          <div className="mb-3">
+            <label className="btn-ghost cursor-pointer">
+              {uploading ? '上传中…' : '＋ 上传附件（≤ 50MB）'}
+              <input
+                type="file"
+                className="hidden"
+                disabled={uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) void uploadFile(f)
+                  e.target.value = '' // allow re-selecting the same file
+                }}
+              />
+            </label>
+            <span className="ml-2 text-xs text-slate-400">合同 / 资质扫描件 / 营业执照等</span>
+          </div>
+        )}
+        {(doc.attachments?.length ?? 0) === 0 ? (
+          <Empty text="暂无附件" />
+        ) : (
           <ul className="space-y-1 text-sm">
             {doc.attachments!.map((a, i) => (
               <li key={i} className="flex items-center gap-2">
-                <a className="text-brand-600 hover:underline" href={a.url}>{a.name}</a>
+                <a
+                  className="text-brand-600 hover:underline"
+                  href={apiUrl(a.url)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {a.name}
+                </a>
                 <span className="text-xs text-slate-400">{(a.size / 1024).toFixed(0)} KB</span>
               </li>
             ))}

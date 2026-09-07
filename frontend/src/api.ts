@@ -101,6 +101,26 @@ export const api = {
 
   restoreSupplier: (id: string) =>
     request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/restore`),
+
+  // Upload an attachment (multipart). Returns the updated supplier document.
+  // The hard limit is 50MB (enforced server-side; 413 on overflow).
+  uploadAttachment: async (id: string, file: File): Promise<Supplier> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(BASE + `/api/v1/suppliers/${encodeURIComponent(id)}/attachments`, {
+      method: 'POST',
+      body: form,
+    })
+    const text = await res.text()
+    const data = text ? JSON.parse(text) : undefined
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
+    return data as Supplier
+  },
+}
+
+/** Prefix a stored relative URL (attachment path) with the API base. */
+export function apiUrl(relPath: string): string {
+  return BASE + relPath
 }
 
 export { ApiError }

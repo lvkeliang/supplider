@@ -18,6 +18,7 @@ import (
 
 	"github.com/supplider/supplider/backend/internal/featureflag"
 	"github.com/supplider/supplider/backend/internal/httpapi"
+	"github.com/supplider/supplider/backend/internal/objectfactory"
 	"github.com/supplider/supplider/backend/internal/storefactory"
 	"github.com/supplider/supplider/backend/internal/supplier"
 	"github.com/supplider/supplider/backend/internal/tier"
@@ -36,6 +37,11 @@ func main() {
 	}
 	defer store.Close()
 
+	objects, err := objectfactory.Open(objectfactory.Config{DataDir: *dataDir})
+	if err != nil {
+		log.Fatalf("open object store: %v", err)
+	}
+
 	svc := supplier.NewService(store)
 
 	// Feature matrix: AI flags stay off until a gateway provider is
@@ -44,7 +50,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           httpapi.New(svc, feats).Mux,
+		Handler:           httpapi.New(svc, feats).WithObjects(objects).Mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

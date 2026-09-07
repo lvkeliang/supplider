@@ -13,7 +13,7 @@
 - [x] **手动录入表单（前端）**：`frontend/`（Vite + React 18 + TS + Tailwind）；核心字段表单 + 动态资质/产品/绩效行 + 动态自定义字段（字段名 + 类型 文本/数字/布尔，不预定义）；可见性选择按 `features.visibility_levels` 门控；create POST / edit PATCH（服务端 diff 自动写 change_log）——2026-09-07
 - [x] **供应商详情页"文档卡片"UI**：基本信息/资质/品类/产品服务/绩效/自定义字段/附件/变更记录各为独立可折叠 `DocumentCard`；自定义字段泛化渲染；风险标记横幅；归档/恢复/编辑操作；列表摘要卡 + 关键词搜索 + 地域/品类/资质/评分筛选 + 游标"加载更多"（列表只取 summary 字段）——2026-09-07
 - [ ] **Monorepo 前端骨架（部分完成）**：`frontend/` 已就位（dev 走 Vite 代理 /api→127.0.0.1:7612；产物 dist/ ~55KB gzip）；**待办**：Tauri 2.0 `desktop/` Rust 壳（需安装 Rust 工具链，本机暂无 cargo）——sidecar 自动拉起 + 内嵌 dist/ + 打包 Win/macOS/Linux；**Tauri 接入前需给 Go HTTP 层加 localhost CORS**（Tauri origin `tauri://localhost` 直连 sidecar）
-- [ ] **附件管理**：本地文件系统存储（用户目录下 `attachments/`），上传/下载/列表；单文件 ≤50MB 限制
+- [x] **附件管理**：`objectstore` 端口 + `localfs` 适配器（`<DataDir>/attachments/<供应商id>/<文件>`，纯标准库零依赖）；`objectfactory` 按 tier 接线（personal/small-business/默认→localfs，enterprise→nil 待 S3，空 DataDir→nil 禁用，HTTP 返 501）；HTTP `POST /suppliers/{id}/attachments`（multipart，`MaxBytesReader` + 适配器 LimitReader 双重 50MB 限制，超限 413）与 `GET /attachments/{key...}` 流式下载（中文文件名 RFC 5987 `filename*`）；服务层 AddAttachment 自动写 change_log；前端详情页附件卡支持上传/下载（≤50MB 前端预校验）——2026-09-07
 - [ ] **Excel 批量导入**：模板下载、上传解析、列映射（先做手动映射 UI，AI 映射后置）、校验报错行报告、批量写入（1000 条 <3s）
 - [ ] **基础全文搜索**：内嵌 Meilisearch（或先用 SQLite FTS5 过渡，搜索接口不变）；中文分词、模糊匹配、拼音、同义词；搜索结果缓存 5 分钟；响应 <200ms
 - [ ] **条件筛选**：地域（省/市/区）、品类、资质等级、评分范围组合过滤 + 排序；结构化查询走存储层
@@ -73,8 +73,11 @@
 - [x] Backend monorepo 骨架：Go module、build tag 三 tier 接线（storefactory/tier/featureflag）、domain 文档模型、supplier service（change_log diff、评分聚合、归档/恢复）、HTTP API、srm-cli 雏形、memory 参考适配器
 - [x] DataModel 接口 + contract 契约套件 + SQLite JSONB 适配器（personal/small-business 已接线；enterprise 占位待 Mongo）——2026-09-07
 - [x] 前端（React+TS+Tailwind/Vite）：列表搜索筛选 + 游标分页、手动录入/编辑表单（动态自定义字段）、文档卡片详情页；AI 入口按 /features 隐藏——2026-09-07
+- [x] 附件管理（本地 FS）：objectstore 端口 + localfs 适配器（50MB 双重限制、路径穿越防护）+ objectfactory 接线 + multipart 上传/流式下载 HTTP + 前端附件卡上传/下载——2026-09-07
 
 ## Notes
+- **附件/对象存储设计要点**：① `objectstore.Store` 是 S3 形状端口（Put/Get/Remove/URL），localfs 是纯标准库实现，MinIO/S3 后补同接口；具体实现只允许出现在适配器包 + `objectfactory` 接线文件（grep 红线已验证，httpapi 只依赖端口）。② 50MB 限制做两层：HTTP `MaxBytesReader` 兜整个请求体（413），适配器内 `io.LimitReader(Max+1)` 兜流式字节（防 Content-Length 撒谎），写临时文件再 rename（失败不留残文件）。③ 对象 key 服务端生成 `<供应商id>/<unixnano>_<safeBase>`，`resolve()` 用 filepath.Rel 防 `..` 穿越。④ 下载只从对象库取字节，原始文件名/MIME 从供应商文档 attachments 记录解析，`Content-Disposition` 用 RFC 5987 `filename*=UTF-8''` 保中文。⑤ 空 DataDir（内存沙箱）对象库为 nil，上传端点返 501，平台其余功能不受影响
+- **下一轮候选（按 MVP 闭环）**：① Excel 批量导入（Go `excelize` 纯 Go、模板下载/列映射/校验报错行，1000 条<3s）——录入闭环最后一块；② 导出 JSON/Excel + srm-cli export/compare；③ SQLite FTS5 全文搜索替换朴素 substring（featureflag 已标 fts5，中文分词/拼音是硬需求）；④ Tauri 壳（装 Rust 后，先给 Go HTTP 加 localhost CORS）
 - **前端架构要点**：前端不引入 react-router 等重依赖，用 App 内 `View` 联合状态做三屏路由（list/new/detail/edit）；`src/api.ts` 是唯一发 fetch 的地方，业务/UI 只调类型化函数；`types.ts` 是 Go domain 的 TS 投影（以后端 JSON tag 为准）。dev 用 Vite proxy 同源转发 sidecar；Tauri 生产构建用 `VITE_API_BASE=http://127.0.0.1:7612` 直连。AI 入口（OCR/文档搜索/NL/Excel 智能映射）本轮不渲染，靠 `features.ai_*` 为 false 自动隐藏——无 Key 即无 AI 入口
 - **下一轮候选（按 MVP 闭环）**：① 附件本地 FS 上传（objectstore/localfs 已有端口，需 HTTP multipart + ≤50MB 校验 + 前端附件区）；② Excel 批量导入（Go excelize + 手动列映射 UI + 校验报错行）；③ 导出 JSON/Excel + srm-cli export/compare 补齐；④ 数据模型目前全端内存 filter/关键字，搜索质量下一步用 SQLite FTS5 落地（featureflag 已标 fts5）；⑤ Tauri 壳（装 Rust 后）
 - **SQLite 驱动选型（已定）**：用 `modernc.org/sqlite`（纯 Go、无 cgo）而非 `mattn/go-sqlite3`（cgo）——Tauri sidecar 需交叉编译 Win/macOS/Linux 单二进制，cgo 要求目标平台 C 工具链，与"零依赖双击安装"冲突。modernc v1.58 内含 SQLite 3.51，原生支持 JSONB。代价：go directive 升至 1.25（工具链自动下载），二进制略大（可接受，~15MB 目标仍可达）。驱动只允许出现在 `datamodel/sqlite` 适配器包内

@@ -7,12 +7,28 @@ package objectstore
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"time"
 )
 
 // MaxAttachmentSize is the 50MB per-file hard limit (PRD 性能红线).
 const MaxAttachmentSize = 50 * 1024 * 1024
+
+// ErrObjectNotFound is returned by Get/Remove when no object matches a key.
+var ErrObjectNotFound = errors.New("objectstore: object not found")
+
+// ErrTooLarge is returned when an upload exceeds MaxAttachmentSize. Size is
+// the observed/declared size, Max the hard limit.
+type ErrTooLarge struct {
+	Size int64
+	Max  int64
+}
+
+func (e *ErrTooLarge) Error() string {
+	return fmt.Sprintf("objectstore: object %d bytes exceeds %d-byte limit", e.Size, e.Max)
+}
 
 // Object is stored-file metadata.
 type Object struct {
