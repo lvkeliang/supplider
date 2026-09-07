@@ -43,6 +43,7 @@ import (
 
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
+	"github.com/supplider/supplider/backend/internal/search"
 )
 
 // Schema version, bumped when migrateSQL changes.
@@ -138,6 +139,14 @@ CREATE INDEX IF NOT EXISTS idx_sc_category ON supplier_categories(category);
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("sqlite: migrate: %w", err)
 	}
+	// FTS5 trigram index (Chinese substring + pinyin + synonyms). Separate
+	// DDL so virtual-table syntax stays grouped in fts.go.
+	if _, err := s.db.ExecContext(ctx, ftsSchema); err != nil {
+		return fmt.Errorf("sqlite: migrate fts: %w", err)
+	}
+	if err := s.reindexFTS(ctx); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `PRAGMA user_version = `+strconv.Itoa(schemaVersion))
 	return err
 }
@@ -222,6 +231,12 @@ ON CONFLICT(id) DO UPDATE SET
 			}
 		}
 		_ = stmt.Close()
+	}
+
+	// Full-text index (trigram content + pinyin/synonyms) — same txn as
+	// the document upsert, so the index never lags the data.
+	if err := syncFTS(ctx, tx, doc); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -411,9 +426,10 @@ func buildWhere(f datamodel.SupplierFilter) ([]string, []any) {
 		add("s.visibility <= ?", *f.VisibilityMax)
 	}
 	if kw := strings.TrimSpace(f.Keyword); kw != "" {
-		// Naive substring match, parity with the memory adapter: the real
-		// full-text port (search.Index / FTS5) owns tokenization & pinyin.
-		add("LOWER(s.search_text) LIKE LOWER(?) ESCAPE '\\'", "%"+escapeLike(kw)+"%")
+		// Full-text search: ≥3-rune terms use the FTS5 trigram index
+		// (Chinese substring + pinyin + synonyms); shorter terms fall back
+		// to LIKE on search_text (trigram cannot index sub-3-char phrases).
+		where, args = keywordPredicates(where, args, kw)
 	}
 	return where, args
 }
@@ -499,6 +515,12 @@ func decode(docText, id string) (*domain.Supplier, error) {
 // buildSearchText flattens the keyword-searchable fields into one blob,
 // matching memory.matchesKeyword. Chinese text is matched as substrings;
 // LOWER() handles ASCII case-insensitivity.
+//
+// The blob also carries index-time synonym expansions (商砼 ↔ 混凝土…):
+// it backs BOTH the LIKE fallback (sub-3-rune terms, which FTS5 trigram
+// cannot index) and the FTS5 content column, so synonym lookups work on
+// either path — searching "商砼" finds a document that only says
+// "混凝土" and vice-versa.
 func buildSearchText(d *domain.Supplier) string {
 	var b strings.Builder
 	b.WriteString(d.BasicInfo.CompanyName)
@@ -522,7 +544,11 @@ func buildSearchText(d *domain.Supplier) string {
 		b.WriteString(" ")
 		fmt.Fprintf(&b, "%v", v)
 	}
-	return b.String()
+	text := b.String()
+	if extras := search.SynonymExpansions(text); len(extras) > 0 {
+		text += " " + strings.Join(extras, " ")
+	}
+	return text
 }
 
 // escapeLike escapes LIKE metacharacters so keyword input is literal text
