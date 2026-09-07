@@ -19,6 +19,8 @@
 //	POST   /api/v1/import/commit                batch-import rows
 //	GET    /api/v1/export?format=json|xlsx      export all matching suppliers
 //	                                           (same filters as list)
+//	GET    /api/v1/reminders/expiring?within=90  qualification expiry scan
+//	                                           (90/30/7-day windows + expired)
 package httpapi
 
 import (
@@ -82,6 +84,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/import/preview", s.handleImportPreview)
 	s.Mux.HandleFunc("POST /api/v1/import/commit", s.handleImportCommit)
 	s.Mux.HandleFunc("GET /api/v1/export", s.handleExport)
+	s.Mux.HandleFunc("GET /api/v1/reminders/expiring", s.handleExpiringReminders)
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -520,6 +523,48 @@ func filterFromQuery(q url.Values) datamodel.SupplierFilter {
 		IncludeArchived: q.Get("include_archived") == "true" || q.Get("include_archived") == "1",
 		Keyword:         q.Get("q"),
 	}
+}
+
+// ---------- maintenance reminders ----------
+
+// expiringReport is the GET /api/v1/reminders/expiring payload: the flat
+// alert list (most urgent first) plus aggregate counts the UI renders as a
+// banner without re-deriving buckets.
+type expiringReport struct {
+	GeneratedAt time.Time             `json:"generated_at"`
+	WithinDays  int                   `json:"within_days"`
+	Count       int                   `json:"count"`
+	Expired     int                   `json:"expired"` // subset of Count, bucket == expired
+	Items       []supplier.ExpiryAlert `json:"items"`
+}
+
+// handleExpiringReminders answers the qualification-expiry maintenance
+// scan (资质到期提醒, 提前 90/30/7 天). ?within=N overrides the 90-day
+// outer window. This is the non-AI base path — no network, no keys.
+func (s *Server) handleExpiringReminders(w http.ResponseWriter, r *http.Request) {
+	within := supplier.DefaultExpiryWindow
+	if v := r.URL.Query().Get("within"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			within = n
+		}
+	}
+	alerts, err := s.Service.ExpiringQualifications(r.Context(), within)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	rep := expiringReport{
+		GeneratedAt: time.Now().UTC(),
+		WithinDays:  within,
+		Count:       len(alerts),
+		Items:       alerts,
+	}
+	for _, a := range alerts {
+		if a.Bucket == supplier.BucketExpired {
+			rep.Expired++
+		}
+	}
+	writeJSON(w, http.StatusOK, rep)
 }
 
 // ---------- export ----------

@@ -13,6 +13,7 @@
 //	srm-cli info <id> [--json]
 //	srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
 //	srm-cli compare <id> <id>... [--criteria price,delivery,qual]
+//	srm-cli expiring [--within N] [--json]   资质到期提醒 (90/30/7 天窗口 + 已过期)
 //
 // Shared [filters]: --province --city --district --category --min-qual
 // --min-rating --owner --q.
@@ -58,6 +59,8 @@ func main() {
 		err = cmdExport(args)
 	case "compare":
 		err = cmdCompare(args)
+	case "expiring":
+		err = cmdExpiring(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -82,6 +85,8 @@ Usage:
   srm-cli info <id> [--json]
   srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
   srm-cli compare <id> <id>... [--criteria price,delivery,qual]
+  srm-cli expiring [--within N] [--json]
+                                 资质到期提醒：列出已过期/7 天内/30 天内/90 天内到期的资质
 
 Filters (shared by list/search/export):
   --province 省  --city 市  --district 区县  --category 品类(逗号分隔, OR)
@@ -602,6 +607,107 @@ func fmtAvg(s *domain.Supplier, pick func(domain.Performance) float64) string {
 		return "-"
 	}
 	return fmt.Sprintf("%.2f", sum/float64(n))
+}
+
+// ---------- expiring (资质到期提醒) ----------
+
+// expiryAlert mirrors supplier.ExpiryAlert JSON.
+type expiryAlert struct {
+	SupplierID   string `json:"supplier_id"`
+	SupplierName string `json:"supplier_name"`
+	Province     string `json:"province"`
+	City         string `json:"city"`
+	QualType     string `json:"qual_type"`
+	QualLevel    string `json:"qual_level"`
+	CertNo       string `json:"cert_no"`
+	Expiry       string `json:"expiry"`
+	DaysLeft     int    `json:"days_left"`
+	Bucket       string `json:"bucket"`
+}
+
+// cmdExpiring lists qualifications already expired or expiring within the
+// PRD windows (提前 90/30/7 天), most urgent first. This is the non-AI
+// maintenance scan — run it from cron/Task Scheduler for daily reminders.
+func cmdExpiring(args []string) error {
+	fs := flag.NewFlagSet("expiring", flag.ContinueOnError)
+	within := fs.Int("within", 90, "look-ahead window in days (default 90; the 90/30/7 buckets are always labeled)")
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	q := url.Values{}
+	q.Set("within", fmt.Sprintf("%d", *within))
+	resp, err := http.Get(apiBase() + "/api/v1/reminders/expiring?" + q.Encode())
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+
+	var rep struct {
+		WithinDays int           `json:"within_days"`
+		Count      int           `json:"count"`
+		Expired    int           `json:"expired"`
+		Items      []expiryAlert `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	}
+
+	if rep.Count == 0 {
+		fmt.Printf("(no qualifications expiring within %d days)\n", rep.WithinDays)
+		return nil
+	}
+
+	rows := [][]string{{"状态", "到期日", "剩余", "供应商", "资质", "证书号"}}
+	for _, a := range rep.Items {
+		rows = append(rows, []string{
+			urgencyLabel(a),
+			a.Expiry,
+			daysLeftLabel(a.DaysLeft),
+			truncateCell(a.SupplierName, 24),
+			truncateCell(strings.TrimSpace(a.QualType+" "+a.QualLevel), 26),
+			a.CertNo,
+		})
+	}
+	printTable(rows)
+	fmt.Fprintf(os.Stderr, "\n%d 项资质需要处理（其中 %d 项已过期）。\n", rep.Count, rep.Expired)
+	return nil
+}
+
+// urgencyLabel renders the bucket as a Chinese status tag.
+func urgencyLabel(a expiryAlert) string {
+	switch a.Bucket {
+	case "expired":
+		return "✗ 已过期"
+	case "7d":
+		return "!! 7 天内"
+	case "30d":
+		return "! 30 天内"
+	default:
+		return "90 天内"
+	}
+}
+
+// daysLeftLabel renders the remaining-time column ("已过期 12 天" /
+// "6 天后" / "今天到期").
+func daysLeftLabel(days int) string {
+	switch {
+	case days < 0:
+		return fmt.Sprintf("已过期 %d 天", -days)
+	case days == 0:
+		return "今天到期"
+	default:
+		return fmt.Sprintf("%d 天后", days)
+	}
 }
 
 // printTable prints rows as a padded grid. Widths account for CJK

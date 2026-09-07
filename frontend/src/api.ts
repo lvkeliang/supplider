@@ -3,6 +3,7 @@
 // build set VITE_API_BASE=http://127.0.0.1:7612. Business/UI code calls
 // these functions and never touches fetch or URLs directly.
 import type {
+  ExpiringReport,
   Features,
   ImportReport,
   Inspection,
@@ -67,6 +68,11 @@ function withQuery(path: string, params: Record<string, string | number | boolea
 
 export const api = {
   features: () => request<Features>('GET', '/api/v1/features'),
+
+  // Qualification-expiry maintenance scan (资质到期提醒, 提前 90/30/7 天).
+  // Non-AI: pure local date math; always available.
+  expiringReminders: (within = 90) =>
+    request<ExpiringReport>('GET', withQuery('/api/v1/reminders/expiring', { within })),
 
   listSuppliers: (p: ListParams = {}) =>
     request<Page<SupplierSummary>>(

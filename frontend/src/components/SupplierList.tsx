@@ -1,8 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type ListParams } from '../api'
-import type { SupplierSummary } from '../types'
+import type { ExpiringReport, SupplierSummary } from '../types'
 import { QUAL_LEVELS, STATUS_ARCHIVED } from '../types'
 import type { Go } from '../App'
+
+/** Human tag for one expiry bucket. */
+function expiryTag(bucket: string): string {
+  switch (bucket) {
+    case 'expired':
+      return '已过期'
+    case '7d':
+      return '7 天内到期'
+    case '30d':
+      return '30 天内到期'
+    default:
+      return '90 天内到期'
+  }
+}
 
 /**
  * List page: keyword full-text box + structured filters (地域/品类/资质/评分)
@@ -16,6 +30,21 @@ export function SupplierList({ go }: { go: Go }) {
   const [cursor, setCursor] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [reminders, setReminders] = useState<ExpiringReport | null>(null)
+  const [showReminders, setShowReminders] = useState(false)
+
+  // Qualification-expiry banner (non-AI maintenance scan). Loaded once on
+  // mount; an empty/absent report renders nothing.
+  useEffect(() => {
+    api
+      .expiringReminders()
+      .then((rep) => {
+        if (rep.count > 0) setReminders(rep)
+      })
+      .catch(() => {
+        /* reminder banner is best-effort — never block the list */
+      })
+  }, [])
 
   const load = useCallback(
     async (p: ListParams, reset: boolean) => {
@@ -134,6 +163,59 @@ export function SupplierList({ go }: { go: Go }) {
           </label>
         </div>
       </div>
+
+      {reminders && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            reminders.expired > 0
+              ? 'border-red-200 bg-red-50 text-red-800'
+              : 'border-amber-200 bg-amber-50 text-amber-800'
+          }`}
+        >
+          <button
+            className="flex w-full items-center gap-2 text-left font-medium"
+            onClick={() => setShowReminders((v) => !v)}
+          >
+            <span>{reminders.expired > 0 ? '🚫' : '⏰'}</span>
+            <span>
+              {reminders.expired > 0
+                ? `${reminders.expired} 项资质已过期`
+                : `${reminders.count} 项资质即将到期`}
+              （90 天内，含 7/30 天提醒窗口）
+            </span>
+            <span className="ml-auto text-xs opacity-70">{showReminders ? '收起 ▲' : '展开 ▼'}</span>
+          </button>
+          {showReminders && (
+            <ul className="mt-2 divide-y divide-current/10 border-t border-current/10">
+              {reminders.items.map((a) => (
+                <li key={`${a.supplier_id}-${a.qual_type}-${a.expiry}`} className="py-1.5">
+                  <button
+                    className="flex w-full items-center gap-2 text-left"
+                    onClick={() => go({ name: 'detail', id: a.supplier_id })}
+                  >
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs ${
+                        a.bucket === 'expired'
+                          ? 'bg-red-200 text-red-900'
+                          : a.bucket === '7d'
+                            ? 'bg-orange-200 text-orange-900'
+                            : 'bg-amber-200 text-amber-900'
+                      }`}
+                    >
+                      {expiryTag(a.bucket)}
+                    </span>
+                    <span className="font-medium">{a.supplier_name}</span>
+                    <span className="text-xs opacity-80">
+                      {a.qual_type}
+                      {a.qual_level ? ` · ${a.qual_level}` : ''} · 到期 {a.expiry}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 

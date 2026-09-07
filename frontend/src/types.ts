@@ -115,6 +115,31 @@ export interface Page<T> {
   next_cursor?: string
 }
 
+// ---- Maintenance reminders (资质到期提醒, GET /api/v1/reminders/expiring) ----
+
+/** One certificate already expired or inside the 90/30/7-day windows. */
+export interface ExpiryAlert {
+  supplier_id: string
+  supplier_name: string
+  province?: string
+  city?: string
+  qual_type: string
+  qual_level?: string
+  cert_no?: string
+  expiry: string
+  /** Negative = expired that many days ago; 0 = expires today. */
+  days_left: number
+  bucket: 'expired' | '7d' | '30d' | '90d'
+}
+
+export interface ExpiringReport {
+  generated_at: string
+  within_days: number
+  count: number
+  expired: number
+  items: ExpiryAlert[]
+}
+
 export interface Features {
   tier: string
   ai_enabled: boolean

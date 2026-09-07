@@ -5,18 +5,40 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 下一步优先级（个人版 MVP）
 
-1. **资质到期提醒（90/30/7 天）**：纯业务逻辑，无需新基础设施——supplier service 加
-   `ExpiringQualifications(days []int)` 扫描 + CLI `srm-cli expiring` + 前端列表页提醒横幅；
-   工商变更监控留 [AI]/API 占位，先有非 AI 的手动到期扫描。
+1. **空壳特征检测（非 AI 规则引擎）**：录入/审核环节的自动校验——供应商服务加
+   `CheckRisks` 规则（注册资本过低/成立日期过新/信用代码校验位/资质重复/信息缺失等
+   纯本地规则），结果写 risk_flags；无 Key 可用，AI 风险报告作为增强层后挂。
 2. **Tauri 安装包真机验证**：shell 代码与 sidecar 已完成并通过 HTTP 层 E2E（见下），
    但本机无 Rust 工具链，未跑过 `tauri build`；需在有 Rust 的机器执行
    `scripts/build-sidecar.sh && cd src-tauri && tauri build`，验证安装包体积（目标 ~15MB）
    与双击拉起 sidecar。图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。
 3. **Meilisearch 内嵌适配器**：实现 `search.Index` 接口替换 SQLite FTS5（当前 FTS 是过渡方案，行为已被测试钉住，可直接对照）。
 4. 可见性策略收紧流程（个人版只需 0/1 两级的数据处置骨架）。
-5. MCP 暴露（srm-cli 已有 search/add/list/info/export/compare，包一层 MCP Tools/Resources）。
+5. MCP 暴露（srm-cli 已有 search/add/list/info/export/compare/expiring，包一层 MCP Tools/Resources）。
 
 ## 已完成
+
+### 2026-09-08：资质到期提醒（90/30/7 天 + 已过期）——生命周期"维护"非 AI 基线
+
+- **业务逻辑**（`internal/supplier/expiry.go`）：`ExpiringQualifications(ctx, withinDays)`
+  按 Export 同款 keyset 分页遍历**在库**供应商（归档不产生维护噪音），解析每份资质的
+  expiry 日期；按日差归入 expired（<0)/7d(≤7)/30d(≤30)/90d(≤90) 桶，按紧迫度排序
+  （最过期的在前）。日期解析接受 ISO 日期与 RFC3339 时间戳（防御性），空/乱码日期
+  静默跳过不炸整批；日差按 UTC 日历天（截断到午夜），不受时分/时区影响。
+- **可测时钟**：`Service.WithClock(func() time.Time)` 导出——生产走 UTC 墙钟，测试冻时间。
+- **API**：`GET /api/v1/reminders/expiring?within=90` → `{count, expired, items[]}`，
+  items 含 supplier_id/name、地域、资质类型/等级/证书号、到期日、days_left、bucket。
+- **CLI**：`srm-cli expiring [--within N] [--json]`——CJK 等宽表格，状态列
+  ✗已过期/!!7天内/!30天内/90天内，剩余列"已过期 18 天 / 6 天后 / 今天到期"；适合挂
+  cron/计划任务做每日提醒。
+- **前端**：SupplierList 挂载时拉取一次（best-effort，失败不影响列表）；有提醒时列表上方
+  出现可展开横幅——有已过期为红色（"N 项资质已过期"），否则琥珀色（"N 项资质即将到期"）；
+  展开后每条点击直达供应商详情。
+- 测试：`expiry_test.go` 3 例（冻结时钟）——窗口分桶与排序、今天到期(0天)/RFC3339/
+  乱码日期跳过、归档排除；全量 `go test` 在默认与 -tags personal 下全绿，
+  -tags enterprise 编译通过。E2E（真实 HTTP）验证 API 与 CLI 输出一致。
+- 工商变更监控仍是 [AI]/API 层占位；此扫描即 PRD"变更推送/到期提醒"在无 Key 环境的
+  100% 可用降级路径。
 
 ### 2026-09-08：Tauri 2.0 桌面 shell + 单二进制 Web 模式（sidecar 打包落地）
 
