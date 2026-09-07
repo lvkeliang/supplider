@@ -50,13 +50,36 @@ export function SupplierList({ go }: { go: Go }) {
 
   const set = (patch: Partial<ListParams>) => setParams((p) => ({ ...p, ...patch }))
 
+  // Export the CURRENT filter view: the server streams an attachment
+  // (Content-Disposition), so a hidden anchor click downloads without
+  // leaving the app. JSON = full-fidelity backup bundle; XLSX = exchange
+  // workbook round-trippable through the Excel importer.
+  const downloadExport = (format: 'json' | 'xlsx') => {
+    const a = document.createElement('a')
+    a.href = api.exportUrl(params, format)
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-slate-800">供应商</h1>
-        <button className="btn-primary" onClick={() => go({ name: 'new' })}>
-          ＋ 新建供应商
-        </button>
+        <div className="flex gap-2">
+          <button className="btn-ghost" onClick={() => go({ name: 'import' })}>
+            ⬆ Excel 导入
+          </button>
+          <button className="btn-ghost" onClick={() => downloadExport('xlsx')} title="按当前筛选导出 Excel（可再导入）">
+            ⬇ 导出 Excel
+          </button>
+          <button className="btn-ghost" onClick={() => downloadExport('json')} title="按当前筛选导出完整 JSON 备份（含变更记录/附件信息）">
+            ⬇ JSON 备份
+          </button>
+          <button className="btn-primary" onClick={() => go({ name: 'new' })}>
+            ＋ 新建供应商
+          </button>
+        </div>
       </div>
 
       {/* Search + filters */}

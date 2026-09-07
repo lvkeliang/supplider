@@ -250,6 +250,50 @@ func (s *Service) Restore(ctx context.Context, id string) (*domain.Supplier, err
 	return doc, nil
 }
 
+// ImportItem is one spreadsheet row destined for batch import. Row is the
+// 1-based spreadsheet row (header = row 1, first data row = 2) so error
+// reports point the user at the exact cell range.
+type ImportItem struct {
+	Row   int         `json:"row"`
+	Input CreateInput `json:"input"`
+}
+
+// ImportError reports one failed row; valid rows still import.
+type ImportError struct {
+	Row     int    `json:"row"`
+	Message string `json:"message"`
+}
+
+// ImportReport summarizes a batch import.
+type ImportReport struct {
+	Created int           `json:"created"`
+	Failed  int           `json:"failed"`
+	IDs     []string      `json:"ids,omitempty"`
+	Errors  []ImportError `json:"errors,omitempty"`
+}
+
+// Import creates suppliers in bulk (Excel import). Each row goes through the
+// SAME Create path — validation, ID generation, change_log — so an imported
+// document is indistinguishable from a manually entered one. Source is forced
+// to import for provenance. One bad row never aborts the batch: its error is
+// recorded and import continues (校验报错行报告).
+func (s *Service) Import(ctx context.Context, items []ImportItem) ImportReport {
+	rep := ImportReport{Errors: []ImportError{}}
+	for _, it := range items {
+		in := it.Input
+		in.Source = domain.SourceImport
+		doc, err := s.Create(ctx, in)
+		if err != nil {
+			rep.Failed++
+			rep.Errors = append(rep.Errors, ImportError{Row: it.Row, Message: err.Error()})
+			continue
+		}
+		rep.Created++
+		rep.IDs = append(rep.IDs, doc.ID)
+	}
+	return rep
+}
+
 // List returns a page of supplier SUMMARIES (list endpoints never return
 // full documents — performance red line).
 func (s *Service) List(ctx context.Context, q datamodel.Query) (datamodel.Page[domain.Summary], error) {
@@ -265,6 +309,41 @@ func (s *Service) List(ctx context.Context, q datamodel.Query) (datamodel.Page[d
 		out.Items = append(out.Items, domain.ToSummary(doc))
 	}
 	return out, nil
+}
+
+// MaxExportDocs caps a single export. Personal databases are local and
+// small (hundreds to low thousands of rows); the cap guards against
+// unbounded memory use rather than representing a workflow limit.
+const MaxExportDocs = 50000
+
+// Export returns ALL documents matching the filter — FULL documents, not
+// summaries (export is the backup/exchange path, so change_log,
+// attachments and custom_fields are included). It walks keyset pages
+// internally: unlike the interactive list, export is exempt from the
+// 100-row page cap because it is a batch operation, not a UI query.
+func (s *Service) Export(ctx context.Context, filter datamodel.SupplierFilter) ([]*domain.Supplier, error) {
+	docs := make([]*domain.Supplier, 0, datamodel.DefaultPageSize)
+	cursor := ""
+	for {
+		page, err := s.store.List(ctx, datamodel.Query{
+			Filter: filter,
+			Limit:  datamodel.MaxPageSize,
+			Cursor: cursor,
+			Sort:   datamodel.Sort{Field: datamodel.SortCreatedAt, Order: datamodel.OrderDesc},
+		})
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, page.Items...)
+		if page.NextCursor == "" || len(docs) >= MaxExportDocs {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if len(docs) > MaxExportDocs {
+		docs = docs[:MaxExportDocs]
+	}
+	return docs, nil
 }
 
 // ---------- validation / diffing / rating ----------

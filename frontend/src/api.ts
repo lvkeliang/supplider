@@ -4,6 +4,8 @@
 // these functions and never touches fetch or URLs directly.
 import type {
   Features,
+  ImportReport,
+  Inspection,
   Page,
   Supplier,
   SupplierSummary,
@@ -88,6 +90,26 @@ export const api = {
       }),
     ),
 
+  // Download URL for exporting the current filter view. `format` is 'json'
+  // (full-fidelity backup bundle) or 'xlsx' (exchange workbook). The server
+  // answers with Content-Disposition: attachment, so navigating to the URL
+  // (or clicking a hidden anchor) starts a download without leaving the app.
+  exportUrl: (p: ListParams, format: 'json' | 'xlsx') =>
+    withQuery('/api/v1/export', {
+      q: p.q,
+      province: p.province,
+      city: p.city,
+      district: p.district,
+      category: p.category,
+      min_qual_level: p.min_qual_level,
+      min_rating: p.min_rating,
+      max_rating: p.max_rating,
+      owner: p.owner,
+      status: p.status,
+      include_archived: p.include_archived,
+      format,
+    }),
+
   getSupplier: (id: string) => request<Supplier>('GET', `/api/v1/suppliers/${encodeURIComponent(id)}`),
 
   createSupplier: (body: Partial<Supplier>) =>
@@ -116,9 +138,40 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
     return data as Supplier
   },
+
+  // ---- Excel import ----
+
+  // Preview an uploaded workbook: headers + sample rows + suggested mapping.
+  previewImport: async (file: File): Promise<Inspection> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(BASE + '/api/v1/import/preview', { method: 'POST', body: form })
+    const data = await res.json().catch(() => undefined)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
+    return data as Inspection
+  },
+
+  // Commit an import with a confirmed column mapping (column index → field
+  // key; "custom" keeps the column as a custom field, "" ignores it).
+  commitImport: async (
+    file: File,
+    mapping: Record<string, string>,
+    owner: string,
+    visibility: number,
+  ): Promise<ImportReport> => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('mapping', JSON.stringify(mapping))
+    form.append('owner', owner)
+    form.append('visibility', String(visibility))
+    const res = await fetch(BASE + '/api/v1/import/commit', { method: 'POST', body: form })
+    const data = await res.json().catch(() => undefined)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
+    return data as ImportReport
+  },
 }
 
-/** Prefix a stored relative URL (attachment path) with the API base. */
+/** Prefix a stored relative URL (attachment/template path) with the API base. */
 export function apiUrl(relPath: string): string {
   return BASE + relPath
 }

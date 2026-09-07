@@ -133,6 +133,35 @@ export interface Features {
   queue: string
 }
 
+// ---- Excel import ----
+
+export interface FieldOption {
+  key: string
+  label: string
+  required: boolean
+}
+
+export interface Inspection {
+  headers: string[]
+  sample: string[][]
+  /** Column index (as string) → field key; "custom" = custom_field, "" = ignore. */
+  suggested: Record<string, string>
+  fields: FieldOption[]
+  total_data_rows: number
+}
+
+export interface ImportError {
+  row: number
+  message: string
+}
+
+export interface ImportReport {
+  created: number
+  failed: number
+  ids?: string[]
+  errors?: ImportError[]
+}
+
 // Lifecycle / visibility constants mirrored from the Go domain package.
 export const STATUS_ACTIVE = 'active'
 export const STATUS_PENDING = 'pending'

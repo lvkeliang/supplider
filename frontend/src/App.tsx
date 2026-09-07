@@ -4,14 +4,16 @@ import type { Features } from './types'
 import { SupplierList } from './components/SupplierList'
 import { SupplierForm } from './components/SupplierForm'
 import { SupplierDetail } from './components/SupplierDetail'
+import { ImportView } from './components/ImportView'
 
-// Minimal in-app router (no extra dependency): the desktop MVP has three
-// screens. Tauri/web history is not needed for the seed milestone.
+// Minimal in-app router (no extra dependency): the desktop MVP has a handful
+// of screens. Tauri/web history is not needed for the seed milestone.
 type View =
   | { name: 'list' }
   | { name: 'new' }
   | { name: 'detail'; id: string }
   | { name: 'edit'; id: string }
+  | { name: 'import' }
 
 const TIER_LABELS: Record<string, string> = {
   personal: '个人版',
@@ -81,6 +83,9 @@ export default function App() {
             id={view.id}
             visibilityLevels={features?.visibility_levels ?? 2}
           />
+        )}
+        {view.name === 'import' && (
+          <ImportView go={go} visibilityLevels={features?.visibility_levels ?? 2} />
         )}
       </main>
     </div>

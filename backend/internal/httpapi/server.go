@@ -14,6 +14,11 @@
 //	POST   /api/v1/suppliers/{id}/restore
 //	POST   /api/v1/suppliers/{id}/attachments   upload (multipart, ≤50MB)
 //	GET    /api/v1/attachments/{key...}         download/stream
+//	GET    /api/v1/import/template              download .xlsx template
+//	POST   /api/v1/import/preview               parse + suggest column mapping
+//	POST   /api/v1/import/commit                batch-import rows
+//	GET    /api/v1/export?format=json|xlsx      export all matching suppliers
+//	                                           (same filters as list)
 package httpapi
 
 import (
@@ -31,7 +36,9 @@ import (
 
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
+	"github.com/supplider/supplider/backend/internal/exporter"
 	"github.com/supplider/supplider/backend/internal/featureflag"
+	"github.com/supplider/supplider/backend/internal/importer"
 	"github.com/supplider/supplider/backend/internal/objectstore"
 	"github.com/supplider/supplider/backend/internal/supplier"
 )
@@ -71,6 +78,10 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/restore", s.handleRestore)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/attachments", s.handleUploadAttachment)
 	s.Mux.HandleFunc("GET /api/v1/attachments/{key...}", s.handleDownloadAttachment)
+	s.Mux.HandleFunc("GET /api/v1/import/template", s.handleImportTemplate)
+	s.Mux.HandleFunc("POST /api/v1/import/preview", s.handleImportPreview)
+	s.Mux.HandleFunc("POST /api/v1/import/commit", s.handleImportCommit)
+	s.Mux.HandleFunc("GET /api/v1/export", s.handleExport)
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -311,6 +322,137 @@ func (s *Server) handleDownloadAttachment(w http.ResponseWriter, r *http.Request
 	_, _ = io.Copy(w, rc)
 }
 
+// ---------- Excel import ----------
+
+// maxImportBytes bounds an uploaded workbook. 1000-row supplier sheets are a
+// few hundred KB; 20MB is generous headroom well under any memory concern.
+const maxImportBytes = 20 << 20
+
+// handleImportTemplate serves the .xlsx import template.
+func (s *Server) handleImportTemplate(w http.ResponseWriter, r *http.Request) {
+	data, err := importer.Template()
+	if err != nil {
+		log.Printf("httpapi: build template: %v", err)
+		writeServiceError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="template.xlsx"; filename*=UTF-8''`+url.PathEscape("供应商导入模板.xlsx"))
+	_, _ = w.Write(data)
+}
+
+// handleImportPreview parses a workbook and returns headers + sample rows +
+// suggested column mapping (no writes) so the UI can present manual mapping.
+func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
+	data, _, err := readImportFile(w, r)
+	if err != nil {
+		writeImportError(w, err)
+		return
+	}
+	insp, err := importer.Inspect(data)
+	if err != nil {
+		writeImportError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, insp)
+}
+
+// handleImportCommit applies a column mapping and batch-creates suppliers.
+// Form fields: file (xlsx), mapping (JSON {"<col>":"<field>"}), owner,
+// visibility. Missing mapping falls back to the auto-suggested mapping.
+func (s *Server) handleImportCommit(w http.ResponseWriter, r *http.Request) {
+	data, _, err := readImportFile(w, r)
+	if err != nil {
+		writeImportError(w, err)
+		return
+	}
+
+	mapping := parseMapping(r.FormValue("mapping"))
+	if len(mapping) == 0 {
+		insp, err := importer.Inspect(data)
+		if err != nil {
+			writeImportError(w, err)
+			return
+		}
+		mapping = insp.Suggested
+	}
+
+	visibility := 0
+	if v := r.FormValue("visibility"); v != "" {
+		visibility, _ = strconv.Atoi(v)
+	}
+	defaults := importer.Defaults{Owner: strings.TrimSpace(r.FormValue("owner")), Visibility: visibility}
+
+	items, err := importer.Build(data, mapping, defaults)
+	if err != nil {
+		writeImportError(w, err)
+		return
+	}
+	report := s.Service.Import(r.Context(), items)
+	writeJSON(w, http.StatusOK, report)
+}
+
+// readImportFile reads the multipart "file" field of an import request,
+// capping the body size.
+func readImportFile(w http.ResponseWriter, r *http.Request) ([]byte, string, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
+	if err := r.ParseMultipartForm(maxImportBytes); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return nil, "", fmt.Errorf("import file too large (limit %dMB)", maxImportBytes/(1024*1024))
+		}
+		return nil, "", fmt.Errorf("invalid multipart form: %w", err)
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		return nil, "", fmt.Errorf(`expected a multipart "file" field: %w`, err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxImportBytes+1))
+	if err != nil {
+		return nil, "", err
+	}
+	if int64(len(data)) > maxImportBytes {
+		return nil, "", fmt.Errorf("import file too large (limit %dMB)", maxImportBytes/(1024*1024))
+	}
+	return data, header.Filename, nil
+}
+
+// parseMapping decodes the {"columnIndex":"fieldKey"} mapping JSON.
+func parseMapping(s string) map[int]string {
+	out := map[int]string{}
+	if strings.TrimSpace(s) == "" {
+		return out
+	}
+	var raw map[string]string
+	if err := json.Unmarshal([]byte(s), &raw); err != nil {
+		return out
+	}
+	for k, v := range raw {
+		if i, err := strconv.Atoi(k); err == nil {
+			out[i] = v
+		}
+	}
+	return out
+}
+
+// writeImportError maps importer failures onto HTTP status codes.
+func writeImportError(w http.ResponseWriter, err error) {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "too large"):
+		writeError(w, http.StatusRequestEntityTooLarge, msg)
+	case strings.Contains(msg, "not a valid .xlsx"), strings.Contains(msg, "empty"),
+		strings.Contains(msg, "multipart"), strings.Contains(msg, "no sheets"):
+		writeError(w, http.StatusBadRequest, msg)
+	default:
+		log.Printf("httpapi: import error: %v", err)
+		writeError(w, http.StatusBadRequest, msg)
+	}
+}
+
 // safeFileName strips path separators and control characters so a supplied
 // filename cannot introduce a traversal segment into the object key.
 func safeFileName(name string) string {
@@ -333,6 +475,24 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 
+	query := datamodel.Query{
+		Limit:  limit,
+		Cursor: q.Get("cursor"),
+		Sort:   datamodel.Sort{Field: datamodel.SortField(q.Get("sort")), Order: datamodel.SortOrder(q.Get("order"))},
+		Filter: filterFromQuery(q),
+	}
+
+	page, err := s.Service.List(r.Context(), query)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// filterFromQuery parses the shared supplier filter parameters used by
+// both the interactive list and the export endpoint.
+func filterFromQuery(q url.Values) datamodel.SupplierFilter {
 	visMax := (*int)(nil)
 	if v := q.Get("visibility_max"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -346,32 +506,71 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
 	maxRating, _ := strconv.ParseFloat(q.Get("max_rating"), 64)
 
-	query := datamodel.Query{
-		Limit:  limit,
-		Cursor: q.Get("cursor"),
-		Sort:   datamodel.Sort{Field: datamodel.SortField(q.Get("sort")), Order: datamodel.SortOrder(q.Get("order"))},
-		Filter: datamodel.SupplierFilter{
-			Province:        q.Get("province"),
-			City:            q.Get("city"),
-			District:        q.Get("district"),
-			Categories:      nonEmpty(strings.Split(q.Get("category"), ",")),
-			MinQualRank:     minQual,
-			MinRating:       minRating,
-			MaxRating:       maxRating,
-			OwnerID:         q.Get("owner"),
-			VisibilityMax:   visMax,
-			Status:          q.Get("status"),
-			IncludeArchived: q.Get("include_archived") == "true" || q.Get("include_archived") == "1",
-			Keyword:         q.Get("q"),
-		},
+	return datamodel.SupplierFilter{
+		Province:        q.Get("province"),
+		City:            q.Get("city"),
+		District:        q.Get("district"),
+		Categories:      nonEmpty(strings.Split(q.Get("category"), ",")),
+		MinQualRank:     minQual,
+		MinRating:       minRating,
+		MaxRating:       maxRating,
+		OwnerID:         q.Get("owner"),
+		VisibilityMax:   visMax,
+		Status:          q.Get("status"),
+		IncludeArchived: q.Get("include_archived") == "true" || q.Get("include_archived") == "1",
+		Keyword:         q.Get("q"),
 	}
+}
 
-	page, err := s.Service.List(r.Context(), query)
+// ---------- export ----------
+
+// handleExport streams ALL suppliers matching the list filters as either a
+// full-fidelity JSON bundle (backup / cross-tier import) or an XLSX
+// workbook (human-readable exchange, round-trippable through import). The
+// 100-row page cap does not apply — export pages through the full result
+// set server-side; the service enforces a high safety cap instead.
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	docs, err := s.Service.Export(r.Context(), filterFromQuery(r.URL.Query()))
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, page)
+
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "json"
+	}
+	stamp := time.Now().Format("20060102_150405")
+
+	switch format {
+	case "json":
+		data, err := exporter.JSON(docs, time.Now())
+		if err != nil {
+			log.Printf("httpapi: export json: %v", err)
+			writeServiceError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition",
+			`attachment; filename="suppliers.json"; filename*=UTF-8''`+
+				url.PathEscape(fmt.Sprintf("供应商导出_%s.json", stamp)))
+		_, _ = w.Write(data)
+	case "xlsx":
+		data, err := exporter.XLSX(docs)
+		if err != nil {
+			log.Printf("httpapi: export xlsx: %v", err)
+			writeServiceError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Content-Disposition",
+			`attachment; filename="suppliers.xlsx"; filename*=UTF-8''`+
+				url.PathEscape(fmt.Sprintf("供应商导出_%s.xlsx", stamp)))
+		_, _ = w.Write(data)
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("format must be %q or %q, got %q", "json", "xlsx", format))
+	}
 }
 
 // ---------- helpers ----------

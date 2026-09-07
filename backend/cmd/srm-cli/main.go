@@ -8,12 +8,14 @@
 // Implemented (MVP seed):
 //
 //	srm-cli add <file.json|-> [--visibility N] [--owner user]
-//	srm-cli list [--city 杭州] [--province 浙江] [--category 施工服务]
-//	            [--min-qual 二级] [--min-rating 4.0] [--owner user] [--q 关键词]
-//	            [--limit N] [--cursor CURSOR] [--json]
+//	srm-cli list [filters] [--limit N] [--cursor CURSOR] [--json]
+//	srm-cli search <keyword> [filters]   (FTS backend lands later; same flags)
 //	srm-cli info <id> [--json]
+//	srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
+//	srm-cli compare <id> <id>... [--criteria price,delivery,qual]
 //
-// Roadmap (next loops): search (FTS), export xlsx/json, compare.
+// Shared [filters]: --province --city --district --category --min-qual
+// --min-rating --owner --q.
 package main
 
 import (
@@ -25,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,6 +54,10 @@ func main() {
 		// For now search == list with a keyword; the FTS-backed search
 		// port lands next without changing this command's surface.
 		err = cmdSearch(args)
+	case "export":
+		err = cmdExport(args)
+	case "compare":
+		err = cmdCompare(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -70,13 +77,65 @@ func usage() {
 
 Usage:
   srm-cli add <file.json|-> [--visibility N] [--owner user]
-  srm-cli list [filters] [--json]
+  srm-cli list [filters] [--limit N] [--cursor CURSOR] [--json]
+  srm-cli search <keyword> [filters]
   srm-cli info <id> [--json]
-  srm-cli search <keyword> [filters]   (FTS-backed in next milestone)
+  srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
+  srm-cli compare <id> <id>... [--criteria price,delivery,qual]
+
+Filters (shared by list/search/export):
+  --province 省  --city 市  --district 区县  --category 品类(逗号分隔, OR)
+  --min-qual 二级  --min-rating 4.0  --owner 用户  --q 关键词
 
 Environment:
   SRM_API_ADDR  API base URL (default http://127.0.0.1:7612)
 `)
+}
+
+// filterFlags are the shared structured filter flags used by list, search
+// and export. Bind them onto a FlagSet with bindFilterFlags, then render
+// them as query parameters with apply.
+type filterFlags struct {
+	province  string
+	city      string
+	district  string
+	category  string
+	minQual   string
+	owner     string
+	keyword   string
+	minRating float64
+}
+
+func bindFilterFlags(fs *flag.FlagSet) *filterFlags {
+	f := &filterFlags{}
+	fs.StringVar(&f.province, "province", "", "province filter")
+	fs.StringVar(&f.city, "city", "", "city filter")
+	fs.StringVar(&f.district, "district", "", "district filter")
+	fs.StringVar(&f.category, "category", "", "category filter (comma-separated, OR)")
+	fs.StringVar(&f.minQual, "min-qual", "", "minimum qualification level (e.g. 二级)")
+	fs.StringVar(&f.owner, "owner", "", "owner id filter")
+	fs.StringVar(&f.keyword, "q", "", "keyword")
+	fs.Float64Var(&f.minRating, "min-rating", 0, "minimum rating")
+	return f
+}
+
+// apply encodes the filters onto a query string (empty values are skipped).
+func (f *filterFlags) apply(q url.Values) {
+	set := func(k, v string) {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	set("province", f.province)
+	set("city", f.city)
+	set("district", f.district)
+	set("category", f.category)
+	set("min_qual_level", f.minQual)
+	set("owner", f.owner)
+	set("q", f.keyword)
+	if f.minRating > 0 {
+		q.Set("min_rating", fmt.Sprintf("%g", f.minRating))
+	}
 }
 
 func apiBase() string {
@@ -92,7 +151,7 @@ func cmdAdd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	visibility := fs.Int("visibility", domain.VisSelf, "visibility level 0-4")
 	owner := fs.String("owner", "local", "owner user id")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
@@ -163,14 +222,7 @@ func cmdSearch(args []string) error {
 
 func cmdList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	province := fs.String("province", "", "province filter")
-	city := fs.String("city", "", "city filter")
-	district := fs.String("district", "", "district filter")
-	category := fs.String("category", "", "category filter (comma-separated, OR)")
-	minQual := fs.String("min-qual", "", "minimum qualification level (e.g. 二级)")
-	minRating := fs.Float64("min-rating", 0, "minimum rating")
-	owner := fs.String("owner", "", "owner id filter")
-	keyword := fs.String("q", "", "keyword")
+	filters := bindFilterFlags(fs)
 	limit := fs.Int("limit", 20, "page size (max 100)")
 	cursor := fs.String("cursor", "", "pagination cursor")
 	asJSON := fs.Bool("json", false, "emit raw JSON")
@@ -178,26 +230,14 @@ func cmdList(args []string) error {
 		return err
 	}
 	// `search <keyword>` positional form.
-	if fs.NArg() > 0 && *keyword == "" {
-		*keyword = strings.Join(fs.Args(), " ")
+	if fs.NArg() > 0 && filters.keyword == "" {
+		filters.keyword = strings.Join(fs.Args(), " ")
 	}
 
 	q := url.Values{}
-	set := func(k, v string) {
-		if v != "" {
-			q.Set(k, v)
-		}
-	}
-	set("province", *province)
-	set("city", *city)
-	set("district", *district)
-	set("category", *category)
-	set("min_qual_level", *minQual)
-	set("owner", *owner)
-	set("q", *keyword)
-	set("cursor", *cursor)
-	if *minRating > 0 {
-		q.Set("min_rating", fmt.Sprintf("%g", *minRating))
+	filters.apply(q)
+	if *cursor != "" {
+		q.Set("cursor", *cursor)
 	}
 	if *limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", *limit))
@@ -245,7 +285,7 @@ func cmdList(args []string) error {
 func cmdInfo(args []string) error {
 	fs := flag.NewFlagSet("info", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "emit raw JSON")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
@@ -318,6 +358,318 @@ func printSupplier(s *domain.Supplier) {
 		fmt.Printf("  附件:   %s (%d bytes)\n", a.Name, a.Size)
 	}
 	fmt.Printf("  更新:   %s\n", s.UpdatedAt.Format(time.RFC3339))
+}
+
+// ---------- export ----------
+
+// cmdExport downloads all suppliers matching the shared filters as a JSON
+// bundle (full-fidelity backup; default) or an XLSX workbook (exchange).
+// With --out the bytes go to a file (format inferred from the extension
+// when --format is omitted); otherwise they stream to stdout, so
+// `srm-cli export --format xlsx > backup.xlsx` works.
+func cmdExport(args []string) error {
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	filters := bindFilterFlags(fs)
+	format := fs.String("format", "", "export format: json (default) or xlsx")
+	out := fs.String("out", "", "output file path (default stdout)")
+	includeArchived := fs.Bool("include-archived", false, "include archived suppliers")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+
+	fmtType := strings.ToLower(strings.TrimSpace(*format))
+	if fmtType == "" {
+		// Infer from the output file extension; default to JSON.
+		switch strings.ToLower(filepath.Ext(*out)) {
+		case ".xlsx":
+			fmtType = "xlsx"
+		default:
+			fmtType = "json"
+		}
+	}
+	if fmtType != "json" && fmtType != "xlsx" {
+		return fmt.Errorf("--format must be json or xlsx, got %q", *format)
+	}
+
+	q := url.Values{}
+	filters.apply(q)
+	q.Set("format", fmtType)
+	if *includeArchived {
+		q.Set("include_archived", "true")
+	}
+
+	resp, err := http.Get(apiBase() + "/api/v1/export?" + q.Encode())
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+
+	if *out == "" || *out == "-" {
+		_, err := os.Stdout.Write(data)
+		return err
+	}
+	if err := os.WriteFile(*out, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", *out, err)
+	}
+	fmt.Fprintf(os.Stderr, "exported %s suppliers (%s, %d bytes) → %s\n",
+		countExported(fmtType, data), fmtType, len(data), *out)
+	return nil
+}
+
+// countExported extracts the document count for the human-facing success
+// line without parsing xlsx (JSON bundle carries an explicit count; an
+// xlsx count is left as "?").
+func countExported(format string, data []byte) string {
+	if format != "json" {
+		return "?"
+	}
+	var b struct {
+		Count int `json:"count"`
+	}
+	if json.Unmarshal(data, &b) == nil {
+		return fmt.Sprintf("%d", b.Count)
+	}
+	return "?"
+}
+
+// reorderFlags moves flag arguments before positional ones. The stdlib
+// flag package stops parsing at the first positional argument, but the
+// natural CLI order is positional-first for several commands
+// (`compare <ids...> --criteria …`, `add <file> --visibility …`,
+// `info <id> --json`); reordering lets flags follow positionals.
+func reorderFlags(fs *flag.FlagSet, args []string) []string {
+	// bool flags take no following value.
+	boolFlags := map[string]bool{}
+	fs.VisitAll(func(f *flag.Flag) {
+		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+			boolFlags[f.Name] = true
+		}
+	})
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if len(a) > 1 && strings.HasPrefix(a, "-") {
+			flags = append(flags, a)
+			name := strings.TrimLeft(a, "-")
+			hasValue := strings.Contains(name, "=")
+			name = strings.SplitN(name, "=", 2)[0]
+			if !hasValue && !boolFlags[name] && i+1 < len(args) {
+				i++
+				flags = append(flags, args[i]) // the flag's value
+			}
+			continue
+		}
+		positionals = append(positionals, a)
+	}
+	return append(flags, positionals...)
+}
+
+// ---------- compare ----------
+
+// cmdCompare fetches several suppliers by id and prints a side-by-side
+// comparison table across the dimensions that drive selection: 资质,
+// 评分/绩效 (交付/质量/配合度) and 价格区间. --criteria trims the rows
+// (price,delivery,qual); the default shows every dimension.
+func cmdCompare(args []string) error {
+	fs := flag.NewFlagSet("compare", flag.ContinueOnError)
+	criteria := fs.String("criteria", "", "comma-separated dimensions: price,delivery,qual (default all)")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	if fs.NArg() < 2 {
+		return fmt.Errorf("compare requires at least two supplier ids")
+	}
+
+	showQual, showDelivery, showPrice := true, true, true
+	if strings.TrimSpace(*criteria) != "" {
+		showQual, showDelivery, showPrice = false, false, false
+		for _, c := range strings.Split(*criteria, ",") {
+			switch strings.ToLower(strings.TrimSpace(c)) {
+			case "qual", "qualification", "资质":
+				showQual = true
+			case "delivery", "quality", "cooperation", "绩效":
+				showDelivery = true
+			case "price", "价格":
+				showPrice = true
+			default:
+				return fmt.Errorf("unknown criteria %q (want price, delivery or qual)", c)
+			}
+		}
+	}
+
+	docs := make([]*domain.Supplier, 0, fs.NArg())
+	for _, id := range fs.Args() {
+		resp, err := http.Get(apiBase() + "/api/v1/suppliers/" + url.PathEscape(id))
+		if err != nil {
+			return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return decodeAPIError(resp)
+		}
+		var doc domain.Supplier
+		if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+			return err
+		}
+		docs = append(docs, &doc)
+	}
+
+	// Header row: truncated company name per supplier column.
+	header := []string{"维度"}
+	for _, d := range docs {
+		header = append(header, truncateCell(d.BasicInfo.CompanyName, 22))
+	}
+	rows := [][]string{header}
+	addRow := func(label string, cell func(int) string) {
+		row := []string{label}
+		for i := range docs {
+			row = append(row, truncateCell(cell(i), 22))
+		}
+		rows = append(rows, row)
+	}
+
+	addRow("ID", func(i int) string { return docs[i].ID })
+	addRow("地域", func(i int) string {
+		r := docs[i].BasicInfo.Region
+		return strings.TrimSpace(r.Province + " " + r.City + " " + r.District)
+	})
+	addRow("品类", func(i int) string { return strings.Join(docs[i].Categories, "/") })
+	addRow("联系人", func(i int) string {
+		b := docs[i].BasicInfo
+		return strings.TrimSpace(b.ContactName + " " + b.ContactPhone)
+	})
+	if showQual {
+		addRow("最高资质", func(i int) string {
+			level, _ := domain.TopQualification(docs[i])
+			if level == "" {
+				return "-"
+			}
+			return level
+		})
+	}
+	addRow("综合评分", func(i int) string {
+		if docs[i].Rating > 0 {
+			return fmt.Sprintf("%.2f★", docs[i].Rating)
+		}
+		return "-"
+	})
+	if showDelivery {
+		addRow("交付均分", func(i int) string { return fmtAvg(docs[i], func(p domain.Performance) float64 { return p.Delivery }) })
+		addRow("质量均分", func(i int) string { return fmtAvg(docs[i], func(p domain.Performance) float64 { return p.Quality }) })
+		addRow("配合度均分", func(i int) string {
+			return fmtAvg(docs[i], func(p domain.Performance) float64 { return p.Cooperation })
+		})
+		addRow("合作项目数", func(i int) string { return fmt.Sprintf("%d", len(docs[i].PerformanceHistory)) })
+	}
+	if showPrice {
+		addRow("价格区间", func(i int) string {
+			parts := make([]string, 0, len(docs[i].ProductsServices))
+			for _, p := range docs[i].ProductsServices {
+				if p.UnitPriceRange != "" {
+					parts = append(parts, p.Name+":"+p.UnitPriceRange)
+				}
+			}
+			if len(parts) == 0 {
+				return "-"
+			}
+			return strings.Join(parts, "; ")
+		})
+	}
+	addRow("状态", func(i int) string { return docs[i].Status })
+
+	printTable(rows)
+	return nil
+}
+
+// fmtAvg renders the mean of one performance sub-score ("-" when no data).
+func fmtAvg(s *domain.Supplier, pick func(domain.Performance) float64) string {
+	sum, n := 0.0, 0
+	for _, p := range s.PerformanceHistory {
+		if v := pick(p); v > 0 {
+			sum += v
+			n++
+		}
+	}
+	if n == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.2f", sum/float64(n))
+}
+
+// printTable prints rows as a padded grid. Widths account for CJK
+// characters taking two terminal columns, so Chinese labels stay aligned.
+func printTable(rows [][]string) {
+	widths := make([]int, len(rows[0]))
+	for _, row := range rows {
+		for i, cell := range row {
+			if w := cellWidth(cell); w > widths[i] {
+				widths[i] = w
+			}
+		}
+	}
+	for ri, row := range rows {
+		var b strings.Builder
+		for i, cell := range row {
+			b.WriteString(cell)
+			if i < len(row)-1 {
+				b.WriteString(strings.Repeat(" ", widths[i]-cellWidth(cell)+2))
+			}
+		}
+		fmt.Println(b.String())
+		if ri == 0 {
+			// Separator under the header, sized by display width.
+			total := 0
+			for i, w := range widths {
+				total += w
+				if i < len(widths)-1 {
+					total += 2
+				}
+			}
+			fmt.Println(strings.Repeat("-", total))
+		}
+	}
+}
+
+// cellWidth counts a string's terminal width (CJK runes = 2 columns).
+func cellWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		if r >= 0x2E80 { // CJK + full-width punctuation blocks
+			w += 2
+		} else {
+			w++
+		}
+	}
+	return w
+}
+
+// truncateCell cuts a cell to max terminal columns, appending an ellipsis.
+func truncateCell(s string, max int) string {
+	if cellWidth(s) <= max {
+		return s
+	}
+	w := 0
+	var b strings.Builder
+	for _, r := range s {
+		cw := 1
+		if r >= 0x2E80 {
+			cw = 2
+		}
+		if w+cw > max-1 {
+			break
+		}
+		b.WriteRune(r)
+		w += cw
+	}
+	return b.String() + "…"
 }
 
 func decodeAPIError(resp *http.Response) error {

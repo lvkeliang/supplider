@@ -3,6 +3,7 @@ package supplier_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -196,5 +197,44 @@ func TestArchiveNotFound(t *testing.T) {
 	err := svc.Archive(context.Background(), "sup_missing_000001")
 	if !errors.Is(err, datamodel.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}
+
+// TestExportWalksAllPages proves export crosses the 100-row page boundary:
+// it walks keyset pages internally until the cursor is exhausted, returning
+// full documents (not summaries).
+func TestExportWalksAllPages(t *testing.T) {
+	svc := newSvc()
+	ctx := context.Background()
+	const n = 205 // two full pages + a partial third
+	for i := 0; i < n; i++ {
+		in := validInput()
+		in.BasicInfo.CompanyName = fmt.Sprintf("测试导出供应商%03d", i)
+		if _, err := svc.Create(ctx, in); err != nil {
+			t.Fatalf("Create %d: %v", i, err)
+		}
+	}
+
+	docs, err := svc.Export(ctx, datamodel.SupplierFilter{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if len(docs) != n {
+		t.Fatalf("exported %d docs, want %d (cursor walk broken?)", len(docs), n)
+	}
+	// Export returns full documents: change_log must be present.
+	if len(docs[0].ChangeLog) == 0 {
+		t.Error("export returned summary-shaped document (change_log missing)")
+	}
+
+	// Filters apply to export the same way as to list.
+	filtered, err := svc.Export(ctx, datamodel.SupplierFilter{Keyword: "测试导出供应商001"})
+	if err != nil {
+		t.Fatalf("Export filtered: %v", err)
+	}
+	if len(filtered) == 0 || len(filtered) > 20 {
+		// Keyword matches "001", "001x" (0010-0019), "101" style names do
+		// not contain the literal substring; expect a small subset, never all.
+		t.Errorf("keyword filter returned %d docs, want a small subset", len(filtered))
 	}
 }
