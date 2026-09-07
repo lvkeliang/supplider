@@ -9,14 +9,56 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    但本机无 Rust 工具链，未跑过 `tauri build`；需在有 Rust 的机器执行
    `scripts/build-sidecar.sh && cd src-tauri && tauri build`，验证安装包体积（目标 ~15MB）
    与双击拉起 sidecar。图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。
-2. **Meilisearch 内嵌适配器**：实现 `search.Index` 接口替换 SQLite FTS5（当前 FTS 是过渡方案，行为已被测试钉住，可直接对照）。
-3. **空壳检测的人工审核闭环**：规则引擎+队列已落地（见下），但"人工审批入库/标记已核
-   验/误报忽略"的状态流转还没做——可在 risk_flags 加 `reviewed/verified` 位 + API
-   `POST /suppliers/{id}/risk-review`，详情页加"标记已核验"按钮。
-4. 可见性策略收紧流程（个人版只需 0/1 两级的数据处置骨架）。
-5. MCP 暴露（srm-cli 已有 search/add/list/info/export/compare/expiring/risk，包一层 MCP Tools/Resources）。
+2. **可见性策略收紧流程**：个人版只需 0/1 两级的数据处置骨架（扫描不合规 → 通知录入者
+   → 缓冲标记"待调整" → 超时降级）。当前可见性字段/校验已在，缺策略执行流程。
+3. **MCP 暴露**：srm-cli 已有 search/add/list/info/export/compare/expiring/risk/review，
+   包一层 MCP Tools/Resources + Markdown Skill 文件供外部 AI Agent 读取。
+4. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
+   Meilisearch 是 Rust 独立 server 二进制、无可内嵌 Go 库，塞进个人版会破坏"单二进制
+   零外部依赖 / ~15MB"硬约束。个人版搜索继续用 SQLite FTS5（已在 `search.Index` 接口
+   之后，行为被测试钉住）；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）
+   实现同一接口，届时照 FTS5 测试对照即可。
+5. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
+   保留不被引擎覆盖）；`confirmed_risk → 黑名单`联动可在淘汰阶段做。
 
 ## 已完成
+
+### 2026-09-08：空壳检测人工审核闭环——生命周期"审核"人在回路
+
+规则引擎只"标记"，本环补上"人来清"：审核人查验原件后把供应商清出队列，且资料再变动
+会自动重新进入队列（陈旧的人工结论不能掩盖新信号）。纯本地、无 AI/网络。
+
+- **数据模型**（`domain`）：`RiskFlags` 加 `Reviewed / ReviewedAt / ReviewedBy /
+  ReviewOutcome(verified|dismissed) / ReviewNote`；新增常量 `RiskReviewVerified`
+  （已核验）/`RiskReviewDismissed`（误报忽略）。`Summary` 加 `risk_reviewed` 反范式位，
+  列表据此区分"待审核"红标与"已核验"绿标。
+- **服务层**（`internal/supplier/risk.go`）：
+  - `ReviewRisk(id, RiskReviewInput{Outcome,By,Note})`：校验 outcome（非法报错）、写
+    RiskFlags 审核字段、追加 `risk_review` change_log（含上一次 outcome，可审计）。
+    **不覆盖** shell_risk/notes——引擎结论客观保留，reviewed 只表示"人已受理"；外部信号
+    （被执行人/行政处罚）同样不受影响。
+  - `ShellRiskSuppliers` 队列**跳过 Reviewed**——审核后即出队。
+  - **编辑自动重开**：Update 时若变更触及规则读取的字段（`basic_info.*` / qualifications
+    / categories），清空审核状态；绩效/产品/custom_fields/可见性/附件等不影响空壳判定的
+    编辑**不**重开（`reopenRiskReviewIfNeeded`，在 applyRisk 前调用）。
+- **API**：`POST /api/v1/suppliers/{id}/risk-review`，body `{outcome, by, note}`（body
+  可空，支持 `?outcome=`；by 默认 local）。非法 outcome → 400，不存在 → 404。
+- **CLI**：`srm-cli review <id> [--dismiss] [--outcome verified|dismissed] [--by 用户]
+  [--note ...]`——默认"已核验"，`--dismiss` 误报忽略；成功打印已清出队列。
+- **前端**：详情"风险检测"卡片在未审核时显示「✓ 已核验（查验原件，正规）」「误报忽略」
+  两个按钮（带确认），审核后转为绿色"已人工核验/误报忽略"条（审核人/时间/备注 + 资料
+  变更会重进队列提示），卡片默认折叠；列表卡片红标改为"⚠ 待审核"，已审核显示绿标
+  "✓ 已核验"。
+- 测试：`supplier/risk_test.go` 加 3 例——审核后出队 + change_log + summary 投影
+  (shell_risk=true & risk_reviewed=true)、非法 outcome 报错、**仅风险相关编辑重开**
+  （绩效编辑保持已审核、basic_info 编辑重开并回队）。全量 `go test` 默认/personal 全绿，
+  enterprise/personal 编译通过；前端 tsc+vite 通过。
+- E2E（真实 HTTP，personal）：坏代码+资料简陋贸易商 → 队列 1 → dismiss(by alice) →
+  队列 0 且 shell_risk 仍 true/risk_reviewed=true；非法 outcome 400；PATCH 加法人
+  （basic_info）→ 自动重开 reviewed=false 队列回 1；`srm-cli review` 默认 verified → 队列
+  0；PATCH 绩效 → 保持已审核。
+
+
 
 ### 2026-09-08：空壳特征检测（非 AI 规则引擎）全链路落地——生命周期"审核"无 AI 基线
 

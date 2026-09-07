@@ -183,6 +183,9 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*domai
 	doc.ChangeLog = append(doc.ChangeLog, changes...)
 	doc.UpdatedAt = now
 	recomputeRating(doc)
+	// If the edit touches fields the rule engine reads, a prior human
+	// clearance no longer applies — reopen the review before re-evaluating.
+	reopenRiskReviewIfNeeded(doc, changes)
 	s.applyRisk(doc) // 资料变更后重新跑空壳规则
 
 	if err := s.store.Put(ctx, doc); err != nil {

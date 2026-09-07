@@ -14,7 +14,8 @@
 //	POST   /api/v1/suppliers/{id}/restore
 //	GET    /api/v1/suppliers/{id}/risk          live shell-company rule report
 //	POST   /api/v1/suppliers/{id}/risk-check    re-run rules + persist verdict
-//	GET    /api/v1/risk/shell                   shell-risk review queue (active)
+//	POST   /api/v1/suppliers/{id}/risk-review   human resolves flag (verified|dismissed)
+//	GET    /api/v1/risk/shell                   shell-risk review queue (active, unreviewed)
 //	POST   /api/v1/suppliers/{id}/attachments   upload (multipart, ≤50MB)
 //	GET    /api/v1/attachments/{key...}         download/stream
 //	GET    /api/v1/import/template              download .xlsx template
@@ -83,6 +84,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/restore", s.handleRestore)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/{id}/risk", s.handleSupplierRisk)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-check", s.handleRiskCheck)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-review", s.handleRiskReview)
 	s.Mux.HandleFunc("GET /api/v1/risk/shell", s.handleShellRiskQueue)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/attachments", s.handleUploadAttachment)
 	s.Mux.HandleFunc("GET /api/v1/attachments/{key...}", s.handleDownloadAttachment)
@@ -598,6 +600,41 @@ func (s *Server) handleRiskCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, rep)
+}
+
+// riskReviewRequest is the POST .../risk-review body. All fields but
+// outcome are optional.
+type riskReviewRequest struct {
+	Outcome string `json:"outcome"` // verified | dismissed
+	By      string `json:"by"`
+	Note    string `json:"note"`
+}
+
+// handleRiskReview records a human's resolution of the shell-risk verdict
+// (人工审核闭环): the supplier leaves the review queue until a risk-relevant
+// edit reopens it. Returns the updated document.
+func (s *Server) handleRiskReview(w http.ResponseWriter, r *http.Request) {
+	var req riskReviewRequest
+	// Body is optional — reviewers may POST with an empty body + ?outcome=.
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+	}
+	if strings.TrimSpace(req.Outcome) == "" {
+		req.Outcome = r.URL.Query().Get("outcome")
+	}
+	if strings.TrimSpace(req.By) == "" {
+		req.By = "local"
+	}
+	doc, err := s.Service.ReviewRisk(r.Context(), r.PathValue("id"), supplier.RiskReviewInput{
+		Outcome: req.Outcome,
+		By:      req.By,
+		Note:    req.Note,
+	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
 }
 
 // shellRiskReport is the GET /api/v1/risk/shell payload: the manual-review

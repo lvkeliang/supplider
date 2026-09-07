@@ -56,6 +56,13 @@ export interface RiskFlags {
   executed_person: boolean
   admin_penalty: boolean
   notes?: string
+  /** Human has resolved the local-rule verdict (人工审核闭环). */
+  reviewed?: boolean
+  reviewed_at?: string
+  reviewed_by?: string
+  /** 'verified' (已核验) | 'dismissed' (误报忽略) */
+  review_outcome?: 'verified' | 'dismissed' | string
+  review_note?: string
 }
 
 export interface ChangeEntry {
@@ -109,6 +116,8 @@ export interface SupplierSummary {
   status: string
   /** Denormalized local-rule shell-company flag (空壳风险), set on write. */
   shell_risk?: boolean
+  /** Human has cleared the flag; list badges only UN-reviewed risk. */
+  risk_reviewed?: boolean
   updated_at: string
 }
 

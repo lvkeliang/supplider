@@ -168,6 +168,112 @@ func TestShellRiskScanFlagsActiveOnly(t *testing.T) {
 	_ = clean
 }
 
+func TestReviewClearsQueueAndPersists(t *testing.T) {
+	svc := supplier.NewService(memory.New())
+	ctx := context.Background()
+	riskyIn := cleanInput()
+	riskyIn.BasicInfo.CreditCode = tamperedCode()
+	doc, err := svc.Create(ctx, riskyIn)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Before review: the supplier is in the actionable queue.
+	items, _ := svc.ShellRiskSuppliers(ctx)
+	if len(items) != 1 || items[0].SupplierID != doc.ID {
+		t.Fatalf("queue before review = %+v", items)
+	}
+
+	upd, err := svc.ReviewRisk(ctx, doc.ID, supplier.RiskReviewInput{
+		Outcome: domain.RiskReviewVerified, By: "auditor", Note: "已查原件",
+	})
+	if err != nil {
+		t.Fatalf("ReviewRisk: %v", err)
+	}
+	if !upd.RiskFlags.Reviewed || upd.RiskFlags.ReviewOutcome != domain.RiskReviewVerified ||
+		upd.RiskFlags.ReviewedBy != "auditor" || upd.RiskFlags.ReviewedAt == nil {
+		t.Errorf("review state not persisted: %+v", upd.RiskFlags)
+	}
+	// The resolution is recorded in change_log (provenance).
+	foundReview := false
+	for _, c := range upd.ChangeLog {
+		if c.Field == "risk_review" {
+			foundReview = true
+		}
+	}
+	if !foundReview {
+		t.Error("risk_review not recorded in change_log")
+	}
+
+	// After review: gone from the live queue.
+	items, _ = svc.ShellRiskSuppliers(ctx)
+	if len(items) != 0 {
+		t.Errorf("queue after review = %d, want 0", len(items))
+	}
+
+	// Summary still carries the objective flag but now marked reviewed, so
+	// the list swaps the red "待审核" badge for a green "已核验".
+	page, err := svc.List(ctx, datamodel.Query{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(page.Items) != 1 || !page.Items[0].ShellRisk || !page.Items[0].RiskReviewed {
+		t.Errorf("summary = %+v, want shell_risk=true risk_reviewed=true", page.Items)
+	}
+}
+
+func TestReviewRejectsBadOutcome(t *testing.T) {
+	svc := supplier.NewService(memory.New())
+	doc, _ := svc.Create(context.Background(), cleanInput())
+	if _, err := svc.ReviewRisk(context.Background(), doc.ID,
+		supplier.RiskReviewInput{Outcome: "bogus"}); err == nil {
+		t.Fatal("expected error for invalid review outcome")
+	}
+}
+
+func TestReviewReopensOnlyOnRiskRelevantEdit(t *testing.T) {
+	svc := supplier.NewService(memory.New())
+	ctx := context.Background()
+	riskyIn := cleanInput()
+	riskyIn.BasicInfo.CreditCode = tamperedCode()
+	doc, _ := svc.Create(ctx, riskyIn)
+	if _, err := svc.ReviewRisk(ctx, doc.ID,
+		supplier.RiskReviewInput{Outcome: domain.RiskReviewDismissed}); err != nil {
+		t.Fatalf("ReviewRisk: %v", err)
+	}
+
+	// An unrelated edit (performance history) must NOT reopen the review —
+	// it cannot change the shell verdict.
+	perfs := []domain.Performance{{Project: "X项目", Score: 4}}
+	upd, err := svc.Update(ctx, doc.ID, supplier.UpdateInput{Performance: &perfs})
+	if err != nil {
+		t.Fatalf("Update performance: %v", err)
+	}
+	if !upd.RiskFlags.Reviewed {
+		t.Error("performance edit wrongly reopened the review")
+	}
+	if items, _ := svc.ShellRiskSuppliers(ctx); len(items) != 0 {
+		t.Errorf("queue after unrelated edit = %d, want 0", len(items))
+	}
+
+	// A risk-relevant edit (basic_info) reopens the review, so a stale
+	// clearance can never hide a new signal. Change a real field (legal
+	// person) so the update is not a no-op, keeping the tampered code.
+	b := cleanInput().BasicInfo
+	b.CreditCode = tamperedCode() // still risky under the new data
+	b.LegalPerson = "赵六"          // a genuine basic_info change
+	upd, err = svc.Update(ctx, doc.ID, supplier.UpdateInput{BasicInfo: &b})
+	if err != nil {
+		t.Fatalf("Update basic_info: %v", err)
+	}
+	if upd.RiskFlags.Reviewed {
+		t.Error("basic_info edit did not reopen the review")
+	}
+	if items, _ := svc.ShellRiskSuppliers(ctx); len(items) != 1 {
+		t.Errorf("queue after risk-relevant edit = %d, want 1", len(items))
+	}
+}
+
 func TestCheckRisksPreservesExternalSignals(t *testing.T) {
 	st := memory.New()
 	svc := supplier.NewService(st)

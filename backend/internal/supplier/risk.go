@@ -11,7 +11,9 @@ package supplier
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
@@ -100,6 +102,11 @@ func (s *Service) ShellRiskSuppliers(ctx context.Context) ([]ShellRiskItem, erro
 			return nil, err
 		}
 		for _, doc := range page.Items {
+			// A human has already reviewed and cleared this supplier — it
+			// leaves the actionable queue (the list card stops badging too).
+			if doc.RiskFlags.Reviewed {
+				continue
+			}
 			rep := risk.Evaluate(doc, s.now())
 			if !rep.ShellRisk {
 				continue
@@ -137,4 +144,79 @@ func (s *Service) ShellRiskSuppliers(ctx context.Context) ([]ShellRiskItem, erro
 		return items[i].SupplierName < items[j].SupplierName
 	})
 	return items, nil
+}
+
+// RiskReviewInput carries a human's resolution of a flagged supplier.
+type RiskReviewInput struct {
+	// Outcome is domain.RiskReviewVerified (已核验) or RiskReviewDismissed
+	// (误报忽略).
+	Outcome string
+	By      string // reviewer id (personal tier: local user)
+	Note    string // optional free-text note
+}
+
+// ReviewRisk records a human's resolution of the local-rule shell verdict
+// (人工审核闭环): the rule engine flags; a person clears the flag after
+// inspecting the dossier / paper certificates. The resolution is recorded
+// on RiskFlags and in change_log (provenance). A reviewed supplier leaves
+// the review queue until a risk-relevant edit reopens it (see
+// reopenRiskReviewIfNeeded). The engine verdict (shell_risk/notes) is left
+// intact — it stays objectively true; "reviewed" means a person accepted it.
+func (s *Service) ReviewRisk(ctx context.Context, id string, in RiskReviewInput) (*domain.Supplier, error) {
+	outcome := strings.TrimSpace(in.Outcome)
+	if outcome != domain.RiskReviewVerified && outcome != domain.RiskReviewDismissed {
+		return nil, fmt.Errorf(
+			"supplier: review outcome must be %q or %q, got %q",
+			domain.RiskReviewVerified, domain.RiskReviewDismissed, outcome)
+	}
+	doc, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	now := s.now()
+	prev := doc.RiskFlags.ReviewOutcome
+	doc.RiskFlags.Reviewed = true
+	at := now
+	doc.RiskFlags.ReviewedAt = &at
+	doc.RiskFlags.ReviewedBy = strings.TrimSpace(in.By)
+	doc.RiskFlags.ReviewOutcome = outcome
+	doc.RiskFlags.ReviewNote = strings.TrimSpace(in.Note)
+	doc.ChangeLog = append(doc.ChangeLog, domain.ChangeEntry{
+		Field:  "risk_review",
+		Old:    prev,
+		New:    outcome,
+		Date:   now,
+		Source: domain.SourceManual,
+	})
+	doc.UpdatedAt = now
+	if err := s.store.Put(ctx, doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// reopenRiskReview clears a prior human review when an Update touches a
+// field the rule engine reads, so a stale clearance can never hide a NEW
+// signal. Risk inputs are basic_info (credit code, dates, capital, …),
+// qualifications and categories; edits to performance, products,
+// custom_fields, visibility or attachments do NOT reopen (they cannot change
+// the shell verdict).
+func reopenRiskReviewIfNeeded(doc *domain.Supplier, changes []domain.ChangeEntry) {
+	riskRelevant := false
+	for _, c := range changes {
+		if strings.HasPrefix(c.Field, "basic_info.") ||
+			c.Field == "qualifications" || c.Field == "categories" {
+			riskRelevant = true
+			break
+		}
+	}
+	if !riskRelevant || !doc.RiskFlags.Reviewed {
+		return
+	}
+	doc.RiskFlags.Reviewed = false
+	doc.RiskFlags.ReviewedAt = nil
+	doc.RiskFlags.ReviewedBy = ""
+	doc.RiskFlags.ReviewOutcome = ""
+	doc.RiskFlags.ReviewNote = ""
 }

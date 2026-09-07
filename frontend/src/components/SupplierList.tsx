@@ -290,12 +290,17 @@ export function SupplierList({ go }: { go: Go }) {
           >
             <div className="flex items-center gap-2">
               <span className="font-medium text-slate-800">{s.name}</span>
-              {s.shell_risk && (
+              {s.shell_risk && !s.risk_reviewed && (
                 <span
                   className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700"
-                  title="本地规则检测到空壳风险，点开详情查看逐条信号"
+                  title="本地规则检测到空壳风险，待人工审核（点开详情查看信号/标记已核验）"
                 >
-                  ⚠ 空壳风险
+                  ⚠ 待审核
+                </span>
+              )}
+              {s.shell_risk && s.risk_reviewed && (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700" title="曾检测到风险，已人工核验/处理">
+                  ✓ 已核验
                 </span>
               )}
               {s.status === STATUS_ARCHIVED && (

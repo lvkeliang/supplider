@@ -15,6 +15,8 @@
 //	srm-cli compare <id> <id>... [--criteria price,delivery,qual]
 //	srm-cli expiring [--within N] [--json]   资质到期提醒 (90/30/7 天窗口 + 已过期)
 //	srm-cli risk [id] [--json]               空壳特征检测：无 id 列审核队列，带 id 看该供应商信号
+//	srm-cli review <id> [--dismiss] [--by user] [--note ...]
+//	                                         人工审核闭环：标记已核验(默认)或误报忽略，清出审核队列
 //
 // Shared [filters]: --province --city --district --category --min-qual
 // --min-rating --owner --q.
@@ -64,6 +66,8 @@ func main() {
 		err = cmdExpiring(args)
 	case "risk":
 		err = cmdRisk(args)
+	case "review":
+		err = cmdReview(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -93,6 +97,9 @@ Usage:
   srm-cli risk [id] [--json]
                                  空壳特征检测：无 id 列出待人工审核的空壳风险供应商；
                                  带 id 显示该供应商的逐条风险信号（纯本地规则，无需 AI）
+  srm-cli review <id> [--dismiss] [--by 用户] [--note 备注]
+                                 人工审核闭环：默认标记"已核验"，--dismiss 标记"误报忽略"；
+                                 审核后清出风险队列，资料再变更会自动重新进入队列
 
 Filters (shared by list/search/export):
   --province 省  --city 市  --district 区县  --category 品类(逗号分隔, OR)
@@ -846,6 +853,64 @@ func riskSeverityTag(sev string) string {
 	default:
 		return "· 低"
 	}
+}
+
+// ---------- review (人工审核闭环) ----------
+
+// cmdReview resolves a flagged supplier after a human has inspected it:
+// default outcome "verified" (已核验, papers checked), --dismiss marks a
+// false positive (误报忽略). Either way the supplier leaves the shell-risk
+// queue until a risk-relevant edit reopens it. Mirrors POST .../risk-review.
+func cmdReview(args []string) error {
+	fs := flag.NewFlagSet("review", flag.ContinueOnError)
+	dismiss := fs.Bool("dismiss", false, "mark as false positive (误报忽略) instead of verified")
+	outcome := fs.String("outcome", "", "explicit outcome: verified | dismissed (overrides --dismiss)")
+	by := fs.String("by", "local", "reviewer user id")
+	note := fs.String("note", "", "optional review note")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		return fmt.Errorf("review requires a supplier id")
+	}
+	id := fs.Arg(0)
+
+	res := "verified"
+	if *dismiss {
+		res = "dismissed"
+	}
+	if strings.TrimSpace(*outcome) != "" {
+		res = strings.ToLower(strings.TrimSpace(*outcome))
+	}
+	if res != "verified" && res != "dismissed" {
+		return fmt.Errorf("--outcome must be verified or dismissed, got %q", res)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"outcome": res,
+		"by":      *by,
+		"note":    *note,
+	})
+	resp, err := http.Post(
+		apiBase()+"/api/v1/suppliers/"+url.PathEscape(id)+"/risk-review",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var doc domain.Supplier
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return err
+	}
+	label := "已核验（正规供应商）"
+	if res == "dismissed" {
+		label = "误报忽略"
+	}
+	fmt.Printf("reviewed %s  %s → %s；已清出风险队列。\n", doc.ID, doc.BasicInfo.CompanyName, label)
+	return nil
 }
 
 // printTable prints rows as a padded grid. Widths account for CJK

@@ -128,6 +128,13 @@ type Performance struct {
 	Feedback    string  `json:"feedback,omitempty"`
 }
 
+// Risk review outcomes (人工审核闭环). A reviewer resolves a flagged
+// supplier once they have inspected the dossier / paper certificates.
+const (
+	RiskReviewVerified  = "verified"  // 已核验：人工查验原件，确认为正规供应商
+	RiskReviewDismissed = "dismissed" // 误报忽略：规则误判，无需处理
+)
+
 // RiskFlags carries shell-company / enforcement signals populated by the
 // risk rule engine or external APIs (small_business tier and later).
 type RiskFlags struct {
@@ -135,6 +142,16 @@ type RiskFlags struct {
 	ExecutedPerson bool   `json:"executed_person"` // 被执行人
 	AdminPenalty   bool   `json:"admin_penalty"`   // 行政处罚
 	Notes          string `json:"notes,omitempty"`
+
+	// Human review of the local-rule shell verdict (人工审核). The engine
+	// only flags; a person clears the queue. Reviewed is reset to false when
+	// a risk-relevant field (basic_info / qualifications / categories) is
+	// edited afterwards, so a stale clearance never hides a new signal.
+	Reviewed      bool       `json:"reviewed,omitempty"`
+	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy    string     `json:"reviewed_by,omitempty"`
+	ReviewOutcome string     `json:"review_outcome,omitempty"` // verified | dismissed
+	ReviewNote    string     `json:"review_note,omitempty"`
 }
 
 // ChangeEntry records one field change. Old/New are the previous/new values
@@ -172,24 +189,28 @@ type Summary struct {
 	Status     string   `json:"status"`
 	// ShellRisk is the denormalized local-rule shell-company flag (空壳风险),
 	// set on write so the list can badge risky suppliers without a scan.
-	ShellRisk bool      `json:"shell_risk,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ShellRisk bool `json:"shell_risk,omitempty"`
+	// RiskReviewed mirrors the human-review state; the list badges only
+	// UN-reviewed risk (shell_risk && !risk_reviewed = needs attention).
+	RiskReviewed bool      `json:"risk_reviewed,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // ToSummary projects a full document onto the list-page shape.
 func ToSummary(s *Supplier) Summary {
 	top, _ := TopQualification(s)
 	return Summary{
-		ID:         s.ID,
-		Name:       s.BasicInfo.CompanyName,
-		Province:   s.BasicInfo.Region.Province,
-		City:       s.BasicInfo.Region.City,
-		District:   s.BasicInfo.Region.District,
-		Categories: s.Categories,
-		TopQual:    top,
-		Rating:     s.Rating,
-		Status:     s.Status,
-		ShellRisk:  s.RiskFlags.ShellRisk,
-		UpdatedAt:  s.UpdatedAt,
+		ID:           s.ID,
+		Name:         s.BasicInfo.CompanyName,
+		Province:     s.BasicInfo.Region.Province,
+		City:         s.BasicInfo.Region.City,
+		District:     s.BasicInfo.Region.District,
+		Categories:   s.Categories,
+		TopQual:      top,
+		Rating:       s.Rating,
+		Status:       s.Status,
+		ShellRisk:    s.RiskFlags.ShellRisk,
+		RiskReviewed: s.RiskFlags.Reviewed,
+		UpdatedAt:    s.UpdatedAt,
 	}
 }

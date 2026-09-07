@@ -83,6 +83,16 @@ export const api = {
   // Manual-review queue: active suppliers the local rules flag as shell-risk.
   shellRiskQueue: () => request<ShellRiskReport>('GET', '/api/v1/risk/shell'),
 
+  // Human resolves a flagged supplier (人工审核闭环): 'verified' (papers
+  // checked) or 'dismissed' (false positive). Clears it from the queue until
+  // a risk-relevant edit reopens the review. Returns the updated document.
+  reviewRisk: (id: string, outcome: 'verified' | 'dismissed', by = 'local', note = '') =>
+    request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/risk-review`, {
+      outcome,
+      by,
+      note,
+    }),
+
   listSuppliers: (p: ListParams = {}) =>
     request<Page<SupplierSummary>>(
       'GET',

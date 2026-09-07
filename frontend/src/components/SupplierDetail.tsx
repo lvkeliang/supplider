@@ -39,6 +39,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
 
   const load = useCallback(() => {
     api
@@ -76,6 +77,27 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
+    }
+  }
+
+  // 人工审核闭环：查验原件后标记"已核验"，或标记"误报忽略"。两种结果都把
+  // 供应商清出审核队列；之后若资料再被改动（信用代码/资质/品类等），后端会
+  // 自动重置审核状态、重新进入队列。
+  const reviewRisk = async (outcome: 'verified' | 'dismissed') => {
+    const ok =
+      outcome === 'verified'
+        ? confirm('确认已查验营业执照/资质原件，该供应商为正规主体？')
+        : confirm('确认这些风险信号为误报，忽略并清出审核队列？')
+    if (!ok) return
+    setReviewing(true)
+    setError('')
+    try {
+      await api.reviewRisk(id, outcome)
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setReviewing(false)
     }
   }
 
@@ -134,25 +156,41 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
         </div>
       </div>
 
-      {/* 风险检测：本地规则引擎（非 AI）+ 高版本外部信号。无信号则不显示。 */}
+      {/* 风险检测：本地规则引擎（非 AI）+ 高版本外部信号 + 人工审核闭环。
+          无信号则不显示。 */}
       {(() => {
         const ext = doc.risk_flags
         const external =
           (ext?.executed_person ?? false) || (ext?.admin_penalty ?? false)
         const signals = risk?.signals ?? []
         const shell = risk?.shell_risk ?? ext?.shell_risk ?? false
-        if (!shell && !external && signals.length === 0) return null
+        const flagged = shell || external
+        const reviewed = ext?.reviewed ?? false
+        if (!flagged && signals.length === 0) return null
         return (
           <DocumentCard
             title={
-              shell || external ? (
-                <span className="text-red-700">⚠ 风险检测{shell ? ' · 空壳风险' : ''}</span>
+              flagged ? (
+                reviewed ? (
+                  <span className="text-emerald-700">✓ 风险已审核{shell ? '（空壳信号）' : ''}</span>
+                ) : (
+                  <span className="text-red-700">⚠ 风险检测 · 待人工审核{shell ? '（空壳风险）' : ''}</span>
+                )
               ) : (
                 '资料补全建议'
               )
             }
-            defaultOpen={shell || external}
+            defaultOpen={flagged && !reviewed}
           >
+            {flagged && reviewed && (
+              <div className="mb-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                {ext?.review_outcome === 'dismissed' ? '已标记为误报忽略' : '已人工核验为正规供应商'}
+                {ext?.reviewed_by ? `（审核人：${ext.reviewed_by}` : '（'}
+                {ext?.reviewed_at ? ` · ${new Date(ext.reviewed_at).toLocaleString('zh-CN')}` : ''}）
+                {ext?.review_note ? <div className="mt-0.5 text-emerald-700">备注：{ext.review_note}</div> : null}
+                <div className="mt-0.5 text-xs text-emerald-600">资料再变更（信用代码/资质/品类等）会自动重新进入审核队列。</div>
+              </div>
+            )}
             <ul className="space-y-1.5">
               {ext?.executed_person && (
                 <SignalRow sig={{ code: 'EXT', severity: 'high', message: '被执行人（外部工商/司法数据）' }} />
@@ -160,13 +198,23 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
               {ext?.admin_penalty && (
                 <SignalRow sig={{ code: 'EXT', severity: 'high', message: '行政处罚（外部工商数据）' }} />
               )}
-              {signals.map((sig) => (
-                <SignalRow key={sig.code} sig={sig} />
+              {signals.map((sig, i) => (
+                <SignalRow key={`${sig.code}-${i}`} sig={sig} />
               ))}
             </ul>
             <p className="mt-2 text-xs text-slate-400">
               以上为本地规则自动检测结果（信用代码校验位 / 成立时长 / 资料完整度 / 资质 / 注册资本等），仅供人工审核参考，不会阻断录入。
             </p>
+            {flagged && !reviewed && !archived && (
+              <div className="mt-3 flex gap-2 border-t border-slate-100 pt-3">
+                <button className="btn-primary" disabled={reviewing} onClick={() => reviewRisk('verified')}>
+                  {reviewing ? '处理中…' : '✓ 已核验（查验原件，正规）'}
+                </button>
+                <button className="btn-ghost" disabled={reviewing} onClick={() => reviewRisk('dismissed')}>
+                  误报忽略
+                </button>
+              </div>
+            )}
           </DocumentCard>
         )
       })()}
