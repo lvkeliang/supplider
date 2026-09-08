@@ -41,6 +41,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		text, ferr = s.toolGet(ctx, args)
 	case "add_supplier":
 		text, ferr = s.toolAdd(ctx, args)
+	case "find_duplicates":
+		text, ferr = s.toolFindDuplicates(ctx, args)
 	case "expiring_qualifications":
 		text, ferr = s.toolExpiring(ctx, args)
 	case "shell_risk_queue":
@@ -152,6 +154,21 @@ func (s *Server) toolAdd(ctx context.Context, args json.RawMessage) (string, err
 		a.Owner = "local"
 	}
 
+	// Pre-entry duplicate check (录入去重): warn but never block. The new
+	// supplier is still created; the agent should surface the warning and,
+	// especially for a blacklisted match, tell the user not to proceed.
+	dupWarning := ""
+	if strings.TrimSpace(a.CompanyName) != "" || strings.TrimSpace(a.CreditCode) != "" {
+		dups, derr := s.svc.CheckDuplicates(ctx, domain.BasicInfo{
+			CompanyName: a.CompanyName,
+			CreditCode:  a.CreditCode,
+			Region:      domain.Region{Province: a.Province, City: a.City},
+		})
+		if derr == nil && len(dups) > 0 {
+			dupWarning = fmt.Sprintf("\n\n⚠ 查重发现 %d 家可能重复的供应商（录入未阻断，请核对）：\n%s", len(dups), pretty(dups))
+		}
+	}
+
 	doc, err := s.svc.Create(ctx, supplier.CreateInput{
 		Owner:      a.Owner,
 		Visibility: a.Visibility,
@@ -176,7 +193,33 @@ func (s *Server) toolAdd(ctx context.Context, args json.RawMessage) (string, err
 	if doc.RiskFlags.ShellRisk {
 		status = "⚠ 检测到空壳风险，建议用 shell_risk_queue / supplier_risk 复核：" + doc.RiskFlags.Notes
 	}
-	return fmt.Sprintf("已录入供应商 %s（%s）。%s\n%s", doc.ID, doc.BasicInfo.CompanyName, status, pretty(doc)), nil
+	return fmt.Sprintf("已录入供应商 %s（%s）。%s%s\n%s", doc.ID, doc.BasicInfo.CompanyName, status, dupWarning, pretty(doc)), nil
+}
+
+func (s *Server) toolFindDuplicates(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Name       string `json:"name"`
+		CreditCode string `json:"credit_code"`
+		Province   string `json:"province"`
+		City       string `json:"city"`
+	}
+	decodeArgs(args, &a)
+	if strings.TrimSpace(a.Name) == "" && strings.TrimSpace(a.CreditCode) == "" {
+		return "", fmt.Errorf("name or credit_code is required")
+	}
+	dups, err := s.svc.CheckDuplicates(ctx, domain.BasicInfo{
+		CompanyName: a.Name,
+		CreditCode:  a.CreditCode,
+		Region:      domain.Region{Province: a.Province, City: a.City},
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(dups) == 0 {
+		return "未发现可能重复的供应商（按信用代码/公司名均无匹配，含黑名单/归档）。", nil
+	}
+	return fmt.Sprintf("发现 %d 家可能重复的供应商（确凿=信用代码一致；疑似=公司名一致；含黑名单/归档记录）：\n%s",
+		len(dups), pretty(dups)), nil
 }
 
 func (s *Server) toolExpiring(ctx context.Context, args json.RawMessage) (string, error) {

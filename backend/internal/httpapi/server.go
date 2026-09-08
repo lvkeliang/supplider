@@ -8,6 +8,7 @@
 //	GET    /api/v1/features            runtime feature matrix (drives UI)
 //	POST   /api/v1/suppliers           create
 //	GET    /api/v1/suppliers           list (summary page; filters + cursor)
+//	GET    /api/v1/suppliers/duplicates  pre-entry duplicate check (录入去重)
 //	GET    /api/v1/suppliers/{id}      full document
 //	PATCH  /api/v1/suppliers/{id}      partial update (auto change_log)
 //	DELETE /api/v1/suppliers/{id}      archive
@@ -80,6 +81,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /api/v1/features", s.handleFeatures)
 	s.Mux.HandleFunc("POST /api/v1/suppliers", s.handleCreate)
 	s.Mux.HandleFunc("GET /api/v1/suppliers", s.handleList)
+	s.Mux.HandleFunc("GET /api/v1/suppliers/duplicates", s.handleDuplicates)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/{id}", s.handleGet)
 	s.Mux.HandleFunc("PATCH /api/v1/suppliers/{id}", s.handleUpdate)
 	s.Mux.HandleFunc("DELETE /api/v1/suppliers/{id}", s.handleArchive)
@@ -148,6 +150,30 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, doc)
+}
+
+// handleDuplicates answers a pre-entry duplicate check (录入去重): given a
+// candidate's name/credit code/region it returns existing suppliers that
+// look like the same company — strong on identical credit code, probable on
+// identical normalized name. Blacklisted/archived records are included so a
+// re-onboarded fraudster or a previously-removed company is still flagged.
+// Non-blocking: the caller decides whether to proceed.
+func (s *Server) handleDuplicates(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	candidate := domain.BasicInfo{
+		CompanyName: strings.TrimSpace(q.Get("name")),
+		CreditCode:  strings.TrimSpace(q.Get("credit_code")),
+		Region: domain.Region{
+			Province: strings.TrimSpace(q.Get("province")),
+			City:     strings.TrimSpace(q.Get("city")),
+		},
+	}
+	matches, err := s.Service.CheckDuplicates(r.Context(), candidate)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"count": len(matches), "matches": matches})
 }
 
 func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {

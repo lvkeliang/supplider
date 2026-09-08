@@ -74,6 +74,8 @@ func main() {
 		err = cmdBlacklist(args, true)
 	case "unblacklist":
 		err = cmdBlacklist(args, false)
+	case "duplicates", "dedup":
+		err = cmdDuplicates(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -109,6 +111,8 @@ Usage:
   srm-cli blacklist <id> [--reason 原因]
                                  列入黑名单（淘汰/禁用，仍可搜到但醒目标记）
   srm-cli unblacklist <id>       移出黑名单，恢复在库
+  srm-cli duplicates --name 名称 [--credit-code 代码] [--province 省] [--city 市]
+                                 录入去重：按信用代码(强)/公司名(疑似)查重，含黑名单/归档
 
 Filters (shared by list/search/export):
   --province 省  --city 市  --district 区县  --category 品类(逗号分隔, OR)
@@ -918,6 +922,107 @@ func cmdBlacklist(args []string, add bool) error {
 		fmt.Printf("unblacklisted %s  %s → 已移出黑名单，恢复在库。\n", doc.ID, doc.BasicInfo.CompanyName)
 	}
 	return nil
+}
+
+// ---------- duplicates (录入去重) ----------
+
+// duplicateMatch mirrors supplier.DuplicateMatch JSON.
+type duplicateMatch struct {
+	SupplierID string `json:"supplier_id"`
+	Name       string `json:"name"`
+	Province   string `json:"province"`
+	City       string `json:"city"`
+	Status     string `json:"status"`
+	Level      string `json:"level"`
+	Reason     string `json:"reason"`
+}
+
+// cmdDuplicates runs the pre-entry duplicate check (录入去重): it reports
+// existing suppliers that look like the same company — strong on identical
+// credit code, probable on normalized name — including blacklisted/archived
+// records so a re-onboarded fraudster is caught. Non-blocking: the user
+// decides whether to proceed.
+func cmdDuplicates(args []string) error {
+	fs := flag.NewFlagSet("duplicates", flag.ContinueOnError)
+	name := fs.String("name", "", "company name to check")
+	code := fs.String("credit-code", "", "unified social credit code to check")
+	prov := fs.String("province", "", "province")
+	city := fs.String("city", "", "city")
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*name) == "" && strings.TrimSpace(*code) == "" {
+		return fmt.Errorf("duplicates requires --name and/or --credit-code")
+	}
+
+	q := url.Values{}
+	q.Set("name", *name)
+	q.Set("credit_code", *code)
+	q.Set("province", *prov)
+	q.Set("city", *city)
+	resp, err := http.Get(apiBase() + "/api/v1/suppliers/duplicates?" + q.Encode())
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var rep struct {
+		Count   int              `json:"count"`
+		Matches []duplicateMatch `json:"matches"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	}
+	if rep.Count == 0 {
+		fmt.Println("(no matching suppliers found — likely not a duplicate)")
+		return nil
+	}
+	rows := [][]string{{"强度", "状态", "供应商", "地域", "原因"}}
+	for _, m := range rep.Matches {
+		level := "疑似"
+		if m.Level == "strong" {
+			level = "确凿"
+		}
+		rows = append(rows, []string{
+			level,
+			statusLabel(m.Status),
+			truncateCell(m.Name, 24),
+			truncateCell(strings.TrimSpace(m.Province+" "+m.City), 12),
+			truncateCell(m.Reason, 40),
+		})
+	}
+	printTable(rows)
+	fmt.Fprintf(os.Stderr, "\n发现 %d 家可能重复的供应商%s。录入不会被阻断，请核对后决定是否继续。\n",
+		rep.Count, blacklistedHint(rep.Matches))
+	return nil
+}
+
+func statusLabel(status string) string {
+	switch status {
+	case "blacklisted":
+		return "🚫 黑名单"
+	case "archived":
+		return "已归档"
+	default:
+		return "在库"
+	}
+}
+
+func blacklistedHint(ms []duplicateMatch) string {
+	for _, m := range ms {
+		if m.Status == "blacklisted" {
+			return "（⚠ 含黑名单供应商，请勿重复录入/合作！）"
+		}
+	}
+	return ""
 }
 
 // ---------- review (人工审核闭环) ----------

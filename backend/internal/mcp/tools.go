@@ -116,6 +116,16 @@ func toolDefs() []map[string]any {
 			}, "id"),
 		},
 		{
+			"name":        "find_duplicates",
+			"description": "录入前查重（去重）：按统一社会信用代码(确凿)或规范化公司名(疑似)在库中查找可能重复的供应商，含黑名单/归档记录。add_supplier 之前建议先调用；若命中黑名单尤其要警告用户不要重复合作。纯本地规则。",
+			"inputSchema": schema(map[string]any{
+				"name":        strProp("公司名称（与 credit_code 至少填一个）"),
+				"credit_code": strProp("统一社会信用代码（18 位）"),
+				"province":    strProp("省（辅助核对）"),
+				"city":        strProp("市（辅助核对）"),
+			}),
+		},
+		{
 			"name":        "blacklist_supplier",
 			"description": "淘汰阶段：把供应商列入黑名单（确认造假/严重违约等，仍可搜到但醒目标记为禁用），或从黑名单移出。这是人工生命周期操作，会写入变更记录。",
 			"inputSchema": schema(map[string]any{

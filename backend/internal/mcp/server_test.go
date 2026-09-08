@@ -96,7 +96,7 @@ func TestMCPSession(t *testing.T) {
 	toolsRaw, _ := json.Marshal(resps[1]["result"])
 	for _, want := range []string{"search_suppliers", "get_supplier", "add_supplier",
 		"expiring_qualifications", "shell_risk_queue", "supplier_risk",
-		"blacklist_supplier", "compare_suppliers"} {
+		"find_duplicates", "blacklist_supplier", "compare_suppliers"} {
 		if !strings.Contains(string(toolsRaw), `"name":"`+want+`"`) {
 			t.Errorf("tools/list missing %s", want)
 		}

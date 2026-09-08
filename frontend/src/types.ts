@@ -127,6 +127,19 @@ export interface Page<T> {
   next_cursor?: string
 }
 
+// ---- Duplicate detection (录入去重, non-AI) ----
+
+export interface DuplicateMatch {
+  supplier_id: string
+  name: string
+  province?: string
+  city?: string
+  status: string // active | blacklisted | archived
+  level: 'strong' | 'probable' | string
+  reason: string
+  credit_code?: string
+}
+
 // ---- Maintenance reminders (资质到期提醒, GET /api/v1/reminders/expiring) ----
 
 /** One certificate already expired or inside the 90/30/7-day windows. */

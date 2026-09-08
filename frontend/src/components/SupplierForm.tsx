@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import type { BasicInfo, Qualification, ProductService, Performance, Supplier } from '../types'
-import { QUAL_LEVELS, VIS_LABELS } from '../types'
+import type { BasicInfo, DuplicateMatch, Qualification, ProductService, Performance, Supplier } from '../types'
+import { QUAL_LEVELS, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import type { Go } from '../App'
 
 // 文档式录入:固定核心字段 + 可自由增删的自定义字段(不预定义字段名/类型)。
@@ -64,6 +64,8 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
   const [loading, setLoading] = useState(editing)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [dupes, setDupes] = useState<DuplicateMatch[]>([])
+  const dupReq = useRef(0)
 
   useEffect(() => {
     if (!id) return
@@ -73,6 +75,33 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
   }, [id])
+
+  // Live duplicate check while ENTERING a new supplier (录入去重). Debounced;
+  // skipped in edit mode (the supplier being edited would match itself).
+  const name = form.basic.company_name.trim()
+  const code = (form.basic.credit_code ?? '').trim()
+  const prov = form.basic.region.province.trim()
+  const city = form.basic.region.city.trim()
+  useEffect(() => {
+    if (editing) return
+    if (!name && !code) {
+      setDupes([])
+      return
+    }
+    const seq = ++dupReq.current
+    const t = setTimeout(() => {
+      api
+        .checkDuplicates({ name: form.basic.company_name, credit_code: form.basic.credit_code, province: prov, city })
+        .then((r) => {
+          if (seq === dupReq.current) setDupes(r.matches)
+        })
+        .catch(() => {
+          /* best-effort hint; never block the form */
+        })
+    }, 400)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, code, prov, city, editing])
 
   const setBasic = (patch: Partial<BasicInfo>) =>
     setForm((f) => ({ ...f, basic: { ...f.basic, ...patch } }))
@@ -138,6 +167,40 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       </div>
 
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      {/* 录入去重提示（仅新建时）：命中黑名单用红色，其余琥珀色 */}
+      {!editing && dupes.length > 0 && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            dupes.some((d) => d.status === STATUS_BLACKLISTED)
+              ? 'border-red-300 bg-red-50 text-red-800'
+              : 'border-amber-300 bg-amber-50 text-amber-800'
+          }`}
+        >
+          <div className="font-medium">
+            ⚠ 发现 {dupes.length} 家可能重复的供应商（按信用代码/公司名），录入不会被阻断，请核对：
+          </div>
+          <ul className="mt-1 divide-y divide-current/10">
+            {dupes.map((d) => (
+              <li key={d.supplier_id} className="py-1">
+                <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => go({ name: 'detail', id: d.supplier_id })}>
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${d.level === 'strong' ? 'bg-red-200 text-red-900' : 'bg-amber-200 text-amber-900'}`}>
+                    {d.level === 'strong' ? '确凿·信用代码一致' : '疑似·名称一致'}
+                  </span>
+                  {d.status === STATUS_BLACKLISTED && (
+                    <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">🚫 黑名单</span>
+                  )}
+                  <span className="font-medium">{d.name}</span>
+                  <span className="text-xs opacity-75">
+                    {[d.province, d.city].filter(Boolean).join(' ')} · {d.status}
+                  </span>
+                  <span className="ml-auto text-xs underline">查看</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* 基本信息 */}
       <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">

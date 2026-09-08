@@ -35,7 +35,8 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 | --- | --- | --- |
 | `search_suppliers` | 中文全文/拼音/同义词搜索 + 多维筛选；`q` 留空即列出首页 | `q, province, city, category, min_qual_level, min_rating, include_archived, limit` |
 | `get_supplier` | 读取完整文档式档案（基本信息/资质/品类/产品/绩效/风险/自定义字段/附件/变更记录） | `id` |
-| `add_supplier` | 录入供应商（必填 `company_name, province, city`），录入后自动做空壳检测（不阻断） | 见工具 schema |
+| `add_supplier` | 录入供应商（必填 `company_name, province, city`）；录入前自动查重，命中会在结果中给出重复警告（不阻断） | 见工具 schema |
+| `find_duplicates` | 录入前查重：按信用代码(确凿)/公司名(疑似)找可能重复的供应商（含黑名单/归档）；建议 add 前先调用 | `name?`, `credit_code?`, `province?`, `city?` |
 | `shell_risk_queue` | 待人工审核的空壳风险供应商队列（含逐条信号） | — |
 | `supplier_risk` | 某供应商的空壳检测逐条信号（规则代码 + 中文解释） | `id` |
 | `expiring_qualifications` | 资质到期提醒（已过期 / 90/30/7 天窗口），按紧迫度排序 | `within`（默认 90） |
@@ -69,7 +70,9 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
      可由用户决定后调用 `blacklist_supplier`（你不应擅自拉黑，需用户明确指示）。
 4. **比价选型**：对 2 家以上候选调用 `compare_suppliers`，结合评分/资质/风险给
    出推荐排序，并说明理由。
-5. **录入新供应商**：信息不全也可 `add_supplier`（资料简陋会触发提示性信号，
+5. **录入新供应商前先查重**：调用 `find_duplicates`（或 add 自带的查重警告）；
+   命中黑名单/已有档案时提示用户核对，不要重复录入；**命中黑名单要明确警告不要合作**。
+   确认无重复后再 `add_supplier`（信息不全也可先建，资料简陋会触发提示性信号，
    不阻断），事后让用户补全信用代码/资质等。
 
 ## 输出约定

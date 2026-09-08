@@ -3,6 +3,7 @@
 // build set VITE_API_BASE=http://127.0.0.1:7612. Business/UI code calls
 // these functions and never touches fetch or URLs directly.
 import type {
+  DuplicateMatch,
   ExpiringReport,
   Features,
   ImportReport,
@@ -134,6 +135,19 @@ export const api = {
       include_archived: p.include_archived,
       format,
     }),
+
+  // Pre-entry duplicate check (录入去重): strong on credit code, probable on
+  // normalized name; includes blacklisted/archived records. Non-blocking.
+  checkDuplicates: (cand: { name?: string; credit_code?: string; province?: string; city?: string }) =>
+    request<{ count: number; matches: DuplicateMatch[] }>(
+      'GET',
+      withQuery('/api/v1/suppliers/duplicates', {
+        name: cand.name,
+        credit_code: cand.credit_code,
+        province: cand.province,
+        city: cand.city,
+      }),
+    ),
 
   getSupplier: (id: string) => request<Supplier>('GET', `/api/v1/suppliers/${encodeURIComponent(id)}`),
 

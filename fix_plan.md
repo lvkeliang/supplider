@@ -16,13 +16,51 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    零外部依赖 / ~15MB"硬约束。个人版搜索继续用 SQLite FTS5（已在 `search.Index` 接口
    之后，行为被测试钉住）；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）
    实现同一接口，届时照 FTS5 测试对照即可。
-4. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
+4. **Excel 导入逐行查重 + 合并**：录入去重原语 `CheckDuplicates` 已落地（手动表单/CLI/MCP
+   都用上了），批量导入尚未接入——ImportReport 可加 duplicates 维度，命中行提示/可跳过；
+   人工"合并重复供应商"流程也基于同一原语。
+5. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
    保留不被引擎覆盖）。黑名单生命周期已落地（见下）；外部数据"被执行人→自动预警"可后挂。
 
 5. srm-mcp 打包/分发：`go build -tags personal` 已出独立 stdio 二进制约 12MB，后续
    可纳入 scripts 构建/发布产物，随桌面版分发或单独提供（MCP 主机配置 command 即 srm-mcp）。
 
 ## 已完成
+
+### 2026-09-08：录入去重（非 AI 重复检测）——录入阶段防重复建库
+
+直接服务于产品第一痛点"供应商资源分散、重复录入"。录入前按纯本地规则查重，**只提示
+不阻断**（与风险引擎同一"flag, don't block"哲学）；模糊/AI 相似度是后挂增强层。
+
+- **匹配规则**（`internal/supplier/dedup.go`，保守可解释）：
+  - **确凿 strong**：18 位统一社会信用代码一致（同一主体的确凿标识；先 trim+大写归一，
+    仅长度为 18 的成形代码参与比较）。
+  - **疑似 probable**：规范化后公司名一致——去掉空白与标点（`（）()【】·.,，、-—_/`等，
+    Latin 小写），使"杭州一建（集团）有限公司"与"杭州一建集团有限公司"、空格变体判同。
+  - **全库扫描含黑名单/归档**：IncludeArchived 遍历；命中结果带 `status`。最高价值场景是
+    **重新录入一个已在黑名单的造假供应商**——排序确凿在前、同级别黑名单靠前。
+  - 排序 matchRank：确凿<疑似；同级黑名单优先，再按名称。候选既无成形代码又无名称→空。
+- **服务层**：`CheckDuplicates(ctx, domain.BasicInfo) ([]DuplicateMatch, error)`，纯只读、
+  不改数据；Export 同款 keyset 分页遍历，上限 MaxExportDocs。
+- **API**：`GET /api/v1/suppliers/duplicates?name=&credit_code=&province=&city=`
+  → `{count, matches[]}`（match 含 supplier_id/name/地域/status/level/reason）。
+  字面路径 `/duplicates` 在 ServeMux 中优先于 `/{id}` 通配，无路由冲突。
+- **CLI**：`srm-cli duplicates --name X [--credit-code C --province --city] [--json]`
+  （别名 `dedup`）；CJK 等宽表格（确凿/疑似 × 在库/🚫黑名单/已归档），命中黑名单追加
+  "请勿重复录入/合作"警告。
+- **MCP**：新增 `find_duplicates` 工具；`add_supplier` 在创建前自动查重，命中则在结果
+  文本前置警告（仍创建）；Skill 文档新增该工具并要求"add 前先查重、命中黑名单明确警告"。
+- **前端**：新建表单（非编辑态）对 公司名/信用代码/地域 做 400ms 防抖实时查重，命中展示
+  可展开警告条（确凿红/疑似琥珀；命中黑名单整条转红 + 🚫黑名单徽标），点击直达已有档案；
+  编辑态不触发（避免供应商匹配自身）。
+- 测试：`supplier/dedup_test.go` 4 例——信用代码强匹配(大小写/空格归一)、名称标点/空格
+  变体疑似匹配且不同名称不误报、**黑名单+归档仍被命中且带状态**、空候选无匹配。全量
+  `go test` 默认+personal 全绿，enterprise/personal 编译通过；前端 tsc+vite 通过。
+- E2E：HTTP 按代码(确凿,即使名称不同)/按名(疑似)/不同名(0) 三况正确；黑名单后查重 status
+  正确回传；CLI 表格 + 黑名单提示；MCP `find_duplicates` 与 `add_supplier` 查重警告（创建
+  一个同名新供应商时结果前置"⚠ 查重发现 1 家…黑名单"）。
+- **待办（后挂）**：Excel 批量导入的逐行查重报告（ImportReport 加 duplicates 维度）与
+  人工"合并重复供应商"流程，可基于同一 CheckDuplicates 原语做。
 
 ### 2026-09-08：黑名单生命周期（淘汰/禁用）——生命周期"淘汰"闭环落地
 
