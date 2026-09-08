@@ -15,6 +15,9 @@ Supplider 是面向项目型团队（起步于建筑施工行业）的本地供�
 
 ## MCP 配置
 
+> 完整安装步骤（各平台二进制下载、Claude Desktop / Cursor 配置文件路径、
+> 校验与排障）见同目录 **[SETUP.md](./SETUP.md)**。
+
 MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制名 `srm-mcp`）：
 
 ```json

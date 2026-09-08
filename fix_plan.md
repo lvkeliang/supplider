@@ -24,10 +24,38 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    设置页 SettingsView、sidecar 开机+每 24h 自动处置 ticker、MCP/CLI/HTTP 统一读持久化策略）。
    后挂：企业版通知服务把扫描报告推钉钉/企微的接口已用同一 `VisibilityViolation` 形状预留
    （小企业版/企业版接线即可）；策略变更审计可随操作审计日志（管理员平台）一并做。
-6. srm-mcp 打包/分发：`go build -tags personal` 已出独立 stdio 二进制约 12MB，后续
-   可纳入 scripts 构建/发布产物，随桌面版分发或单独提供（MCP 主机配置 command 即 srm-mcp）。
+6. ~~srm-mcp 打包/分发~~ 已落地（见下：`scripts/build-tools.sh` 交叉编译 srm-mcp +
+   srm-cli 五平台产物到 dist/tools/ + sha256sums；`docs/mcp/SETUP.md` 安装配置指南）。
+   后挂：GitHub Releases 工作流（CI 中跑 build-frontend/build-sidecar/build-tools 三脚本
+   并上传产物）——属 CI 环境工作，本机无法验证。
 
 ## 已完成
+
+### 2026-09-08：srm-mcp / srm-cli 打包分发 + MCP 主机接入指南——开放接入闭环
+
+MCP 服务端早已可用（`go build` 出独立 stdio 二进制），但用户**拿不到也配不上**：
+没有构建脚本产出发布物、没有主机配置文档。本环补齐分发与接入：
+
+- **`scripts/build-tools.sh`**（与 build-sidecar 同款纯 Go 交叉编译）：
+  `CGO_ENABLED=0 -tags personal -ldflags="-s -w"` 一次产出 **srm-mcp + srm-cli
+  × 5 个平台 triple**（linux amd64/arm64、windows amd64、macos amd64/arm64）到
+  `dist/tools/`，并生成 `sha256sums.txt`（发布校验）。产物大小：srm-mcp
+  7.7–8.2MB、srm-cli 5.6–6.0MB（剥离符号后）。`dist/` 加入 .gitignore。
+- **`docs/mcp/SETUP.md`**（面向用户）：发布物命名与下载对照表、sha256 校验、
+  macOS Gatekeeper 隔离属性解除、各系统**默认数据目录路径**（`%APPDATA%` /
+  `~/Library/Application Support` / `~/.local/share` 下 `com.supplider.desktop`）、
+  `--data-dir`/`SRM_DATA_DIR` 独立库用法；Claude Desktop（Win/macOS 配置文件
+  路径 + 日志排障位置）与 Cursor（`~/.cursor/mcp.json`）的 mcpServers 配置；
+  命令行 stdio 自测片段；srm-cli 常用命令速览（含 expiring 可挂 cron）。
+  skill 文档（面向 Agent）顶部加 SETUP.md 指引链接。
+- 验证：脚本实跑 5 平台全绿（纯 Go modernc 交叉编译无需 C 工具链）；linux
+  发布产物 stdio 冒烟——initialize/tools/list（10 工具注册）/add_supplier（
+  含空壳规则自动检测）/search_suppliers 命中/resources 读取/**二次启动数据
+  仍在**；srm-cli usage 正常；sha256sum -c 全部 OK。
+- **边界重申**：MCP 只暴露只读/录入类工具；归档/合并/黑名单/可见性处置不向
+  Agent 开放（SETUP 中写明）。
+- **后挂**：GitHub Releases CI 工作流（三个 build 脚本产物上传）需 CI 环境
+  验证，列入优先级 #6 尾巴。
 
 ### 2026-09-08：合并重复档案选择器——从查重结果直接挑选，不再手输 id
 

@@ -52,3 +52,6 @@ target/
 # bundle is built and synced.
 backend/internal/webui/dist/*
 !backend/internal/webui/dist/.gitkeep
+
+# Standalone CLI/MCP release artifacts (scripts/build-tools.sh → dist/tools).
+dist/
