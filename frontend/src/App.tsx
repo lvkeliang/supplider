@@ -6,6 +6,7 @@ import { SupplierForm } from './components/SupplierForm'
 import { SupplierDetail } from './components/SupplierDetail'
 import { ImportView } from './components/ImportView'
 import { SettingsView } from './components/SettingsView'
+import { CompareView } from './components/CompareView'
 
 // Minimal in-app router (no extra dependency): the desktop MVP has a handful
 // of screens. Tauri/web history is not needed for the seed milestone.
@@ -16,6 +17,7 @@ type View =
   | { name: 'edit'; id: string }
   | { name: 'import' }
   | { name: 'settings' }
+  | { name: 'compare'; ids: string[] }
 
 const TIER_LABELS: Record<string, string> = {
   personal: '个人版',
@@ -98,6 +100,7 @@ export default function App() {
           <ImportView go={go} visibilityLevels={features?.visibility_levels ?? 2} />
         )}
         {view.name === 'settings' && <SettingsView go={go} />}
+        {view.name === 'compare' && <CompareView ids={view.ids} go={go} />}
       </main>
     </div>
   )

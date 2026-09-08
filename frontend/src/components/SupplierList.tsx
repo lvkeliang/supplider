@@ -46,6 +46,11 @@ export function SupplierList({ go }: { go: Go }) {
   const [showReminders, setShowReminders] = useState(false)
   const [shellQueue, setShellQueue] = useState<ShellRiskReport | null>(null)
   const [showShell, setShowShell] = useState(false)
+  // 比价/对比：勾选的供应商 id（跨分页保留，打开对比页时一并提交）。
+  const [selected, setSelected] = useState<string[]>([])
+
+  const toggleSelected = (id: string, on: boolean) =>
+    setSelected((prev) => (on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)))
 
   // Maintenance banners (non-AI scans). Loaded once on mount; empty/absent
   // reports render nothing. Best-effort: a failure never blocks the list.
@@ -283,12 +288,20 @@ export function SupplierList({ go }: { go: Go }) {
       {/* Results */}
       <div className="grid gap-3">
         {items.map((s) => (
-          <button
+          <div
             key={s.id}
             onClick={() => go({ name: 'detail', id: s.id })}
-            className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500 hover:shadow"
+            className="cursor-pointer rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500 hover:shadow"
           >
             <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                className="h-4 w-4 shrink-0"
+                checked={selected.includes(s.id)}
+                title="加入对比"
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => toggleSelected(s.id, e.target.checked)}
+              />
               <span className="font-medium text-slate-800">{s.name}</span>
               {s.status === STATUS_BLACKLISTED && (
                 <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white" title="黑名单（淘汰/禁用），请勿选用">
@@ -334,7 +347,7 @@ export function SupplierList({ go }: { go: Go }) {
                 ))}
               </div>
             )}
-          </button>
+          </div>
         ))}
         {!loading && items.length === 0 && !error && (
           <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-slate-400">
@@ -354,6 +367,26 @@ export function SupplierList({ go }: { go: Go }) {
           </button>
         )}
       </div>
+
+      {/* 对比/比价浮动条：勾选供应商后出现，≥2 家可并排对比。 */}
+      {selected.length > 0 && (
+        <div className="sticky bottom-4 z-10 flex justify-center">
+          <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-lg">
+            <span className="text-sm text-slate-600">已选 {selected.length} 家</span>
+            <button
+              className="btn-primary !rounded-full !py-1 text-sm"
+              disabled={selected.length < 2}
+              title={selected.length < 2 ? '请勾选至少 2 家供应商' : '并排对比评分/资质/价格/风险'}
+              onClick={() => go({ name: 'compare', ids: selected })}
+            >
+              ⚖ 开始对比
+            </button>
+            <button className="text-sm text-slate-400 hover:text-slate-600" onClick={() => setSelected([])}>
+              清空
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
