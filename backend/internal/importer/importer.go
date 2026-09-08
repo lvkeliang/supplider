@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -66,6 +67,11 @@ var fields = []fieldSpec{
 	{Key: "categories", Label: "品类", Aliases: []string{"品类", "品类标签", "分类", "类别", "经营品类"}},
 	{Key: "qual_type", Label: "资质类型", Aliases: []string{"资质类型", "资质名称", "资质"}},
 	{Key: "qual_level", Label: "资质等级", Aliases: []string{"资质等级", "资质级别"}},
+	{Key: "score", Label: "综合评分", Aliases: []string{"综合评分", "评分", "总分", "合作评分", "评价分数"}},
+	{Key: "delivery", Label: "交付评分", Aliases: []string{"交付评分", "交付分", "交付"}},
+	{Key: "quality", Label: "质量评分", Aliases: []string{"质量评分", "质量分", "质量"}},
+	{Key: "cooperation", Label: "配合度评分", Aliases: []string{"配合度评分", "配合度分", "配合度", "协作评分", "配合评分"}},
+	{Key: "feedback", Label: "合作评价", Aliases: []string{"合作评价", "评价", "项目评价", "评价反馈"}},
 }
 
 // FieldOption is the mappable-field list handed to the UI for dropdowns.
@@ -153,6 +159,7 @@ func Template() ([]byte, error) {
 		"company_name": "杭州示例建设有限公司", "province": "浙江", "city": "杭州",
 		"district": "西湖区", "legal_person": "张三", "categories": "施工服务,市政工程",
 		"qual_type": "建筑工程施工总承包", "qual_level": "二级",
+		"score": "4.5", "feedback": "合作顺利，按时交付",
 	}
 	for c, spec := range fields {
 		if v, ok := example[spec.Key]; ok {
@@ -171,6 +178,7 @@ func Template() ([]byte, error) {
 			"第一行为表头，请勿修改；第二行为示例，导入前请删除或覆盖。",
 			"未在表头中列出的列会作为该供应商的自定义字段保留（如 垫资能力、品牌、设备）。",
 			"资质等级支持：特级/一级/二级/三级；品类多个时用逗号分隔。",
+			"绩效评分（综合/交付/质量/配合度）取值 0–5，可只填综合分或只填三维（系统按均值计入评分）；每行记一条合作评价。",
 		} {
 			c, _ := excelize.CoordinatesToCellName(1, i+2)
 			_ = f.SetCellValue("填写说明", c, line)
@@ -276,6 +284,8 @@ func Build(data []byte, mapping map[int]string, defaults Defaults) ([]supplier.I
 		}
 		custom := map[string]any{}
 		var qualType, qualLevel string
+		var perf domain.Performance
+		var hasPerf bool
 
 		for col, key := range mapping {
 			if col >= len(row) || key == FieldIgnore {
@@ -291,11 +301,19 @@ func Build(data []byte, mapping map[int]string, defaults Defaults) ([]supplier.I
 				}
 				continue
 			}
+			if applyPerfField(&perf, key, val) {
+				hasPerf = true
+				continue
+			}
 			applyField(&in, &qualType, &qualLevel, key, val)
 		}
 
 		if qualType != "" {
 			in.Qualifications = []domain.Qualification{{Type: qualType, Level: qualLevel}}
+		}
+		if hasPerf {
+			// One summary collaboration record per imported supplier row.
+			in.Performance = []domain.Performance{perf}
 		}
 		if len(custom) > 0 {
 			in.CustomFields = custom
@@ -303,6 +321,52 @@ func Build(data []byte, mapping map[int]string, defaults Defaults) ([]supplier.I
 		items = append(items, supplier.ImportItem{Row: spreadsheetRow, Input: in})
 	}
 	return items, nil
+}
+
+// applyPerfField writes a performance-score cell into the per-row record.
+// Returns true when key is a performance column. Scores are parsed 0–5;
+// unparseable or out-of-range values are ignored (the service validates).
+func applyPerfField(perf *domain.Performance, key, val string) bool {
+	switch key {
+	case "feedback":
+		perf.Feedback = val
+		return true
+	case "score":
+		if v, ok := parseScore(val); ok {
+			perf.Score = v
+		}
+		return true
+	case "delivery":
+		if v, ok := parseScore(val); ok {
+			perf.Delivery = v
+		}
+		return true
+	case "quality":
+		if v, ok := parseScore(val); ok {
+			perf.Quality = v
+		}
+		return true
+	case "cooperation":
+		if v, ok := parseScore(val); ok {
+			perf.Cooperation = v
+		}
+		return true
+	}
+	return false
+}
+
+// parseScore parses a 0–5 score, tolerating surrounding whitespace and a
+// trailing "分". Returns (0, false) on non-numeric input.
+func parseScore(s string) (float64, bool) {
+	s = strings.TrimSpace(strings.TrimSuffix(s, "分"))
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
+	}
+	if v < 0 || v > domain.MaxScore {
+		return 0, false
+	}
+	return v, true
 }
 
 // applyField writes one mapped cell into the create input.
