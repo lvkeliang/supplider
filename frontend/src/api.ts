@@ -20,7 +20,37 @@ import type {
   VisibilityReport,
 } from './types'
 
-const BASE = import.meta.env.VITE_API_BASE ?? ''
+/**
+ * Resolve the API base.
+ * - Explicit VITE_API_BASE wins (used by the embedded-web build via
+ *   scripts/build-frontend.sh).
+ * - Inside the Tauri desktop shell the frontend is served from
+ *   tauri://localhost (not the sidecar), so relative URLs would miss the
+ *   Go daemon — point straight at the loopback sidecar it spawns
+ *   (src-tauri SIDECAR_ADDR constant). `tauri build` runs `npm run build`
+ *   WITHOUT the env var, so this runtime detection is what makes the
+ *   packaged app connect.
+ * - In a plain browser / `vite dev`, relative URLs work: dev proxies to
+ *   the sidecar and the embedded UI is served from the same origin.
+ */
+function resolveBase(): string {
+  if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE
+  if (typeof window !== 'undefined') {
+    const loc = window.location
+    const inTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window
+    // Packaged Tauri serves from tauri://localhost (macOS/Linux) or
+    // http://tauri.localhost (Windows); `tauri dev` instead uses the
+    // vite server (localhost:5173) where relative URLs already proxy.
+    const tauriProdOrigin =
+      inTauri && (loc.protocol === 'tauri:' || loc.hostname === 'tauri.localhost')
+    if (tauriProdOrigin) {
+      return 'http://127.0.0.1:7612'
+    }
+  }
+  return ''
+}
+
+const BASE = resolveBase()
 
 /** List query parameters — mirrors datamodel.SupplierFilter + paging. */
 export interface ListParams {

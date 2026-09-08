@@ -31,6 +31,35 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-08：修复 Tauri 打包后前端连不上 sidecar（API base 运行时检测）
+
+静态审计 Tauri 打包配置时发现一个会导致**打包后双击应用"后端未连接"**的真实
+缺陷：`tauri.conf.json` 的 `beforeBuildCommand` 是 `npm --prefix ../frontend run build`
+（不带环境变量），而前端 `BASE = import.meta.env.VITE_API_BASE ?? ''`——`tauri build`
+出来的包 BASE 为空，所有请求用相对路径，在 Tauri 里解析到 `tauri://localhost`（
+Windows 为 `http://tauri.localhost`）而非 Go sidecar（127.0.0.1:7612），全部失败。
+（仅 `scripts/build-frontend.sh` 设置了该变量，但 Tauri 打包走的是 conf 里的命令，
+不经过它；在 beforeBuildCommand 里写 `VAR=val npm build` 又不兼容 Windows cmd。）
+
+- **修复**（`frontend/src/api.ts` `resolveBase()`，运行时检测，跨平台）：
+  1. 显式 `VITE_API_BASE` 优先（embedded-web 构建）；
+  2. 在 **Tauri 生产 origin**（`__TAURI_INTERNALS__` 存在 且 protocol `tauri:` 或
+     hostname `tauri.localhost`）→ 直连 `http://127.0.0.1:7612`；
+  3. 其余（浏览器访问内嵌 webui、`vite dev`、`tauri dev` 的 localhost:5173）→
+     相对路径（dev 走 vite 代理、webui 同源）。
+- 关键细节：`tauri dev` 页面在 `localhost:5173`（vite，相对路径经代理正确），不能
+  因为有 Tauri 全局变量就切绝对地址——故必须按 **origin 判定**而非仅查 Tauri 全局。
+- 下载/附件 `<a href>` 同样经 `BASE`（apiUrl），在 Tauri 里一并修好；CSP
+  connect-src 已含 127.0.0.1:7612，CORS 已放行 tauri 两个 origin。
+- 验证：不带 `VITE_API_BASE` 构建（= tauri build 路径）产物中确认检测代码已打包；
+  tsc+vite 通过。
+- **静态审计结论（Tauri 打包，#1）**：其余配置一致——externalBin
+  `binaries/suppliderd` 与 `build-sidecar.sh` 产物命名（`suppliderd-<triple>[.exe]`）
+  匹配；六个图标齐全；capabilities 含 shell spawn/execute/kill 并限定 sidecar；
+  main.rs 以 `--addr 127.0.0.1:7612 --data-dir <app_data_dir>` 拉起、轮询 /readyz、
+  退出 kill；reqwest 用 rustls 免系统 OpenSSL。真正的 `tauri build` 体积/双击验证
+  仍需 Rust 工具链（本机无 cargo/rustc）。
+
 ### 2026-09-08：Excel 导入补齐官网/主营产品列——批量导入与手工表单字段对齐
 
 手工表单已有网址/官网与产品线（产品/服务），Excel 导入缺这两列：迁移贸易商
