@@ -31,6 +31,17 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-08：单二进制 Web 发行链路验证（build-frontend → embed → suppliderd）
+
+无 Rust 工具链下能验证的最后一段打包集成：跑 `scripts/build-frontend.sh`（
+`VITE_API_BASE=http://127.0.0.1:7612` 构建并同步到 `backend/internal/webui/dist`）
+→ `go build -tags personal` 内嵌 → 启动单二进制：
+- `/` 返回真实生产 `index.html`（引用带 hash 的 /assets/*.js、css）；
+- 打包后的 JS/CSS 资源 200、content-type 正确（text/javascript；charset=utf-8）；
+- 同一二进制同时提供 `/api/v1/features` 等 API——UI 与 API 共存于 ~24MB 单文件。
+至此除 `tauri build` 桌面安装包本身（需 cargo/rustc）外，整条构建-嵌入-服务链路均
+实测通过；前端在 Tauri 内的连接由运行时 `resolveBase()` 保证（见下）。
+
 ### 2026-09-08：三构建标签运行时验证 + go vet 全量复检
 
 个人版功能闭环后做跨版本质量复检：`go vet`（default/personal）零告警；全量
