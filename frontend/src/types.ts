@@ -81,6 +81,23 @@ export interface Attachment {
   uploaded_at: string
 }
 
+/**
+ * Visibility policy-tightening disposition state (可见性策略收紧数据处置).
+ * Present while the record is 待调整 (flagged after the admin lowered the
+ * visibility cap); absent once compliant. An open appeal pauses the
+ * auto-downgrade countdown.
+ */
+export interface VisibilityEnforcement {
+  pending_adjustment: boolean
+  flagged_at: string
+  deadline: string
+  previous_visibility: number
+  reason?: string
+  appealed?: boolean
+  appeal_note?: string
+  appealed_at?: string
+}
+
 /** Full supplier document (GET /api/v1/suppliers/{id}). */
 export interface Supplier {
   id: string
@@ -94,6 +111,10 @@ export interface Supplier {
   risk_flags?: RiskFlags
   visibility: number
   shared_with?: string[]
+  /** Present while the record is 待调整 under a tightened visibility policy. */
+  vis_enforcement?: VisibilityEnforcement
+  /** Admin-approved exception (申诉成立): record may stay above the policy cap. */
+  vis_exception?: boolean
   custom_fields?: Record<string, unknown>
   change_log?: ChangeEntry[]
   attachments?: Attachment[]
@@ -119,6 +140,8 @@ export interface SupplierSummary {
   shell_risk?: boolean
   /** Human has cleared the flag; list badges only UN-reviewed risk. */
   risk_reviewed?: boolean
+  /** Record is 待调整 under a tightened visibility policy (buffer running). */
+  vis_pending?: boolean
   updated_at: string
 }
 
@@ -163,6 +186,49 @@ export interface ExpiringReport {
   count: number
   expired: number
   items: ExpiryAlert[]
+}
+
+// ---- Visibility policy tightening (可见性策略收紧数据处置) ----
+
+/** One non-compliant record: state is violation | pending | appealed | overdue. */
+export interface VisibilityViolation {
+  supplier_id: string
+  supplier_name: string
+  owner?: string
+  province?: string
+  city?: string
+  visibility: number
+  max_level: number
+  state: 'violation' | 'pending' | 'appealed' | 'overdue' | string
+  flagged_at?: string
+  deadline?: string
+  /** Days to deadline; negative = overdue that many days. */
+  days_left?: number
+}
+
+export interface VisibilityPolicy {
+  max_level: number
+  buffer_days: number
+}
+
+/** Read-only scan (GET /api/v1/visibility/violations). */
+export interface VisibilityReport {
+  generated_at: string
+  policy: VisibilityPolicy
+  count: number
+  items: VisibilityViolation[]
+}
+
+/** Disposition sweep (POST /api/v1/visibility/enforce). */
+export interface VisibilityEnforceReport {
+  generated_at: string
+  policy: VisibilityPolicy
+  flagged: number
+  pending: number
+  appealed: number
+  downgraded: number
+  resolved: number
+  items: VisibilityViolation[]
 }
 
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----

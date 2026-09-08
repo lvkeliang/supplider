@@ -131,6 +131,24 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     }
   }
 
+  // 可见性策略收紧：对"待调整"标记提出申诉（暂停自动降级倒计时，等待管理员
+  // 裁决）。录入者也可直接在编辑里把可见范围调到合规等级，标记会在下一次
+  // 处置扫描时自动解除。
+  const appealVisibility = async () => {
+    const note = prompt('申诉理由（说明为何需要保留当前可见范围）：')
+    if (note === null) return // cancelled
+    setBusy(true)
+    setError('')
+    try {
+      await api.appealVisibility(id, note.trim())
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const MAX_ATTACH = 50 * 1024 * 1024
   const uploadFile = async (file: File) => {
     if (file.size > MAX_ATTACH) {
@@ -199,6 +217,43 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
         <div className="rounded-lg border border-red-600 bg-red-600 px-4 py-2 text-sm font-medium text-white">
           🚫 该供应商已列入黑名单（淘汰/禁用），请勿选用。
           {doc.blacklist_reason ? <span className="ml-1 font-normal">原因：{doc.blacklist_reason}</span> : null}
+        </div>
+      )}
+
+      {/* 可见性策略收紧：待调整横幅（数据处置流程，非 AI） */}
+      {doc.vis_enforcement?.pending_adjustment && (
+        <div className="rounded-lg border border-amber-400 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          <div className="font-medium">
+            ⏳ 可见性待调整：当前可见范围（{VIS_LABELS[doc.visibility] ?? `等级${doc.visibility}`}）
+            超出策略允许的最高等级。
+            {doc.vis_enforcement.appealed
+              ? ' 已提交申诉，自动降级倒计时暂停，等待管理员裁决。'
+              : doc.vis_enforcement.deadline
+                ? ` 请于 ${doc.vis_enforcement.deadline.slice(0, 10)} 前调整或申诉，超时将自动降级。`
+                : ''}
+          </div>
+          {doc.vis_enforcement.reason && !doc.vis_enforcement.appealed && (
+            <div className="mt-0.5 text-amber-700">{doc.vis_enforcement.reason}</div>
+          )}
+          {doc.vis_enforcement.appealed && doc.vis_enforcement.appeal_note && (
+            <div className="mt-0.5 text-amber-700">申诉理由：{doc.vis_enforcement.appeal_note}</div>
+          )}
+          {!doc.vis_enforcement.appealed && (
+            <div className="mt-2 flex gap-2">
+              <button className="btn-ghost px-2 py-1 text-xs" disabled={busy} onClick={appealVisibility}>
+                我要申诉
+              </button>
+              <button className="btn-ghost px-2 py-1 text-xs" disabled={busy} onClick={() => go({ name: 'edit', id })}>
+                去调整可见范围
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {/* 申诉成立：管理员批准的例外，可保留超出上限的可见等级 */}
+      {doc.vis_exception && !doc.vis_enforcement?.pending_adjustment && (
+        <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
+          ✓ 申诉成立：该供应商的可见范围已获管理员例外批准。再次修改可见范围后需重新申请。
         </div>
       )}
 

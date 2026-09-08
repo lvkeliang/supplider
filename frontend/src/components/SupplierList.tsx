@@ -308,6 +308,14 @@ export function SupplierList({ go }: { go: Go }) {
                   ✓ 已核验
                 </span>
               )}
+              {s.vis_pending && (
+                <span
+                  className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                  title="可见性策略收紧：可见范围超出最高允许等级，缓冲期内请调整或申诉，超时将自动降级"
+                >
+                  ⏳ 待调整
+                </span>
+              )}
               {s.status === STATUS_ARCHIVED && (
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">已归档</span>
               )}

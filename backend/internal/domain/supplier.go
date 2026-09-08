@@ -35,6 +35,7 @@ const (
 	SourceImport    = "import"     // Excel 导入
 	SourceAPISync   = "api_sync"   // 工商变更监控同步
 	SourceAIExtract = "ai_extract" // AI 抽取（增强层，可降级）
+	SourceSystem    = "system"     // 系统自动执行（策略收紧处置/定时任务）
 )
 
 // Supplier is one supplier document.
@@ -55,6 +56,19 @@ type Supplier struct {
 	// for levels 1 (users) and 3 (departments).
 	Visibility int      `json:"visibility"`
 	SharedWith []string `json:"shared_with,omitempty"`
+
+	// VisEnforcement is present while the supplier is inside the
+	// visibility-policy-tightening disposition flow (可见性策略收紧数据处置):
+	// flagged 待调整 → buffer countdown → owner adjusts / appeals / timeout
+	// auto-downgrade. It is a sub-document rather than a status change so the
+	// supplier stays visible/usable throughout the buffer. Absent once the
+	// record is compliant again; every transition is in change_log.
+	VisEnforcement *VisibilityEnforcement `json:"vis_enforcement,omitempty"`
+	// VisException records an admin-approved exception to the visibility
+	// policy (申诉成立): the record may keep a level above the policy max.
+	// Cleared when visibility is next edited — the exception applied to the
+	// level that was approved, not to any future level.
+	VisException bool `json:"vis_exception,omitempty"`
 
 	// CustomFields is free-form. Field names and value types are NOT
 	// predefined — the UI adds them dynamically. Values may be strings,
@@ -160,6 +174,33 @@ type RiskFlags struct {
 	ReviewNote    string     `json:"review_note,omitempty"`
 }
 
+// VisibilityEnforcement tracks one supplier through the data-disposition
+// flow triggered when an admin tightens the visibility policy (策略收紧):
+// records above the new maximum level are flagged 待调整 with a deadline
+// (PRD: 7-day buffer); the owner adjusts the level themselves (flag cleared
+// by the next sweep), files an appeal (申诉, pauses auto-downgrade), or is
+// auto-downgraded to the nearest compliant level when the deadline passes.
+// Personal tier only ever exercises levels 0/1, but the state machine is
+// tier-agnostic.
+type VisibilityEnforcement struct {
+	// Pending is true while the record is 待调整 (flagged, awaiting owner
+	// adjustment or appeal resolution).
+	Pending   bool      `json:"pending_adjustment"`
+	FlaggedAt time.Time `json:"flagged_at"`
+	Deadline  time.Time `json:"deadline"`
+	// PreviousVisibility is the level at flag time, kept for the appeal
+	// context and for change-log history.
+	PreviousVisibility int    `json:"previous_visibility"`
+	Reason             string `json:"reason,omitempty"`
+
+	// Appeal state (申诉). An open appeal pauses the downgrade countdown —
+	// an appealed record is never auto-downgraded; an admin resolves it
+	// (grant = exception, keep level; deny = downgrade immediately).
+	Appealed   bool       `json:"appealed,omitempty"`
+	AppealNote string     `json:"appeal_note,omitempty"`
+	AppealedAt *time.Time `json:"appealed_at,omitempty"`
+}
+
 // ChangeEntry records one field change. Old/New are the previous/new values
 // (nil Old means creation). Source is one of the Source* constants.
 type ChangeEntry struct {
@@ -198,8 +239,11 @@ type Summary struct {
 	ShellRisk bool `json:"shell_risk,omitempty"`
 	// RiskReviewed mirrors the human-review state; the list badges only
 	// UN-reviewed risk (shell_risk && !risk_reviewed = needs attention).
-	RiskReviewed bool      `json:"risk_reviewed,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	RiskReviewed bool `json:"risk_reviewed,omitempty"`
+	// VisPending mirrors vis_enforcement.pending_adjustment: the record is
+	// 待调整 under a tightened visibility policy (buffer countdown running).
+	VisPending bool      `json:"vis_pending,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // ToSummary projects a full document onto the list-page shape.
@@ -217,6 +261,7 @@ func ToSummary(s *Supplier) Summary {
 		Status:       s.Status,
 		ShellRisk:    s.RiskFlags.ShellRisk,
 		RiskReviewed: s.RiskFlags.Reviewed,
+		VisPending:   s.VisEnforcement != nil && s.VisEnforcement.Pending,
 		UpdatedAt:    s.UpdatedAt,
 	}
 }

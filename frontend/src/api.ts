@@ -13,6 +13,8 @@ import type {
   ShellRiskReport,
   Supplier,
   SupplierSummary,
+  VisibilityEnforceReport,
+  VisibilityReport,
 } from './types'
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
@@ -168,6 +170,23 @@ export const api = {
     request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/blacklist`, { reason }),
   unblacklistSupplier: (id: string) =>
     request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/unblacklist`),
+
+  // 可见性策略收紧处置（数据处置流程）。appeal 是录入者动作（暂停自动降级
+  // 倒计时）；resolve 是管理员裁决；violations 只读扫描；enforce 执行处置。
+  appealVisibility: (id: string, note: string) =>
+    request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/appeal-visibility`, { note }),
+  resolveVisibilityAppeal: (id: string, grant: boolean, maxLevel?: number) =>
+    request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/resolve-visibility-appeal`,
+      { grant, ...(maxLevel !== undefined ? { max_level: maxLevel } : {}) }),
+  visibilityViolations: (maxLevel?: number, bufferDays?: number) =>
+    request<VisibilityReport>('GET', withQuery('/api/v1/visibility/violations', {
+      max_level: maxLevel,
+      buffer_days: bufferDays,
+    })),
+  enforceVisibility: (maxLevel?: number, bufferDays?: number) =>
+    request<VisibilityEnforceReport>('POST', '/api/v1/visibility/enforce',
+      { ...(maxLevel !== undefined ? { max_level: maxLevel } : {}),
+        ...(bufferDays !== undefined ? { buffer_days: bufferDays } : {}) }),
 
   // Upload an attachment (multipart). Returns the updated supplier document.
   // The hard limit is 50MB (enforced server-side; 413 on overflow).

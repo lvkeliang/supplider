@@ -135,6 +135,13 @@ func toolDefs() []map[string]any {
 			}, "id"),
 		},
 		{
+			"name":        "visibility_violations",
+			"description": "可见性策略收紧扫描（只读）：列出可见范围超出策略最高允许等级的在库供应商，含处置状态（待调整=缓冲期内/申诉中=倒计时暂停/已超期=下次处置自动降级）与剩余天数。个人版默认最高等级 1。用于提醒录入者调整可见范围或申诉；实际处置（标记/降级）与申诉裁决由管理员经 CLI/后台执行，Agent 不自动处置。纯本地规则。",
+			"inputSchema": schema(map[string]any{
+				"max_level": map[string]any{"type": "integer", "description": "策略允许的最高可见性等级 0-4，默认取当前版本配置（个人版=1）"},
+			}),
+		},
+		{
 			"name":        "compare_suppliers",
 			"description": "并排对比多家供应商：地域/品类/最高资质/评分/绩效均分/价格区间/风险/状态，辅助比价选型。",
 			"inputSchema": schema(map[string]any{

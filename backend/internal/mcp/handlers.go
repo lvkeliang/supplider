@@ -12,6 +12,7 @@ import (
 
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
+	"github.com/supplider/supplider/backend/internal/featureflag"
 	"github.com/supplider/supplider/backend/internal/supplier"
 )
 
@@ -53,6 +54,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		text, ferr = s.toolCompare(ctx, args)
 	case "blacklist_supplier":
 		text, ferr = s.toolBlacklist(ctx, args)
+	case "visibility_violations":
+		text, ferr = s.toolVisibility(ctx, args)
 	default:
 		return nil, &rpcError{Code: errMethodNotFound, Message: "unknown tool: " + p.Name}
 	}
@@ -254,6 +257,36 @@ func (s *Server) toolShellQueue(ctx context.Context) (string, error) {
 		return "没有待人工审核的空壳风险供应商（队列已清空）。", nil
 	}
 	return fmt.Sprintf("%d 家供应商待人工审核：\n%s", len(items), pretty(out)), nil
+}
+
+// toolVisibility is the read-only visibility-policy scan: lists live records
+// whose visibility exceeds the policy cap (个人版默认最高等级 1), annotated
+// with disposition state (待调整/申诉中/已超期). Enforcement (flagging /
+// auto-downgrade) and appeal resolution are admin actions exposed over the
+// CLI/HTTP API — an agent reports violations but does not sweep them.
+func (s *Server) toolVisibility(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		MaxLevel *int `json:"max_level"`
+	}
+	decodeArgs(args, &a)
+	policy := supplier.VisibilityPolicy{}
+	if a.MaxLevel != nil {
+		policy.MaxLevel = *a.MaxLevel
+	} else {
+		// Default to the tier's enabled cap (personal = 2 levels → cap 1).
+		policy.MaxLevel = featureflag.Default().VisibilityLevels - 1
+	}
+	items, err := s.svc.ScanVisibilityViolations(ctx, policy)
+	if err != nil {
+		return "", err
+	}
+	out := map[string]any{"max_level": policy.MaxLevel, "count": len(items), "items": items}
+	if len(items) == 0 {
+		return fmt.Sprintf("没有可见性不合规记录（所有记录均 ≤ 等级 %d）。", policy.MaxLevel), nil
+	}
+	return fmt.Sprintf(
+		"%d 条记录可见范围超出最高允许等级 %d（待调整=缓冲期内、申诉中=倒计时暂停、已超期=下次处置自动降级）。请提示录入者调整可见范围或申诉；处置/裁决由管理员执行：\n%s",
+		len(items), policy.MaxLevel, pretty(out)), nil
 }
 
 func (s *Server) toolSupplierRisk(ctx context.Context, args json.RawMessage) (string, error) {

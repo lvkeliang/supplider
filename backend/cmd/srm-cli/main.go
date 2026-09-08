@@ -19,6 +19,11 @@
 //	                                         人工审核闭环：标记已核验(默认)或误报忽略，清出审核队列
 //	srm-cli blacklist <id> [--reason ...] / srm-cli unblacklist <id>
 //	                                         黑名单（淘汰/禁用）：列入仍可搜到但醒目标记，移出恢复在库
+//	srm-cli visibility [--enforce] [--max-level N] [--buffer-days N] [--json]
+//	                                         可见性策略收紧：扫描/执行待调整→缓冲→超时自动降级处置
+//	srm-cli appeal <id> [--note ...]         录入者申诉待调整标记（暂停倒计时）
+//	srm-cli resolve-appeal <id> --grant|--deny [--max-level N]
+//	                                         管理员裁决申诉（成立=例外保留 / 驳回=立即降级）
 //
 // Shared [filters]: --province --city --district --category --min-qual
 // --min-rating --owner --q.
@@ -76,6 +81,12 @@ func main() {
 		err = cmdBlacklist(args, false)
 	case "duplicates", "dedup":
 		err = cmdDuplicates(args)
+	case "visibility", "vis":
+		err = cmdVisibility(args)
+	case "appeal":
+		err = cmdAppeal(args, true)
+	case "resolve-appeal":
+		err = cmdAppeal(args, false)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -113,6 +124,13 @@ Usage:
   srm-cli unblacklist <id>       移出黑名单，恢复在库
   srm-cli duplicates --name 名称 [--credit-code 代码] [--province 省] [--city 市]
                                  录入去重：按信用代码(强)/公司名(疑似)查重，含黑名单/归档
+  srm-cli visibility [--enforce] [--max-level N] [--buffer-days N] [--json]
+                                 可见性策略收紧处置：默认只读扫描不合规记录；
+                                 --enforce 执行处置（标记待调整/缓冲7天/超时自动降级）
+  srm-cli appeal <id> [--note 申诉理由]
+                                 录入者对"待调整"标记申诉（暂停自动降级倒计时）
+  srm-cli resolve-appeal <id> --grant|--deny [--max-level N]
+                                 管理员裁决申诉：--grant 成立(例外保留等级) / --deny 驳回(立即降级)
 
 Filters (shared by list/search/export):
   --province 省  --city 市  --district 区县  --category 品类(逗号分隔, OR)
@@ -1080,6 +1098,232 @@ func cmdReview(args []string) error {
 		label = "误报忽略"
 	}
 	fmt.Printf("reviewed %s  %s → %s；已清出风险队列。\n", doc.ID, doc.BasicInfo.CompanyName, label)
+	return nil
+}
+
+// ---------- visibility policy enforcement (可见性策略收紧) ----------
+
+// visibilityViolation mirrors supplier.VisibilityViolation JSON.
+type visibilityViolation struct {
+	SupplierID   string     `json:"supplier_id"`
+	SupplierName string     `json:"supplier_name"`
+	Owner        string     `json:"owner"`
+	Province     string     `json:"province"`
+	City         string     `json:"city"`
+	Visibility   int        `json:"visibility"`
+	MaxLevel     int        `json:"max_level"`
+	State        string     `json:"state"`
+	FlaggedAt    *time.Time `json:"flagged_at,omitempty"`
+	Deadline     *time.Time `json:"deadline,omitempty"`
+	DaysLeft     int        `json:"days_left,omitempty"`
+}
+
+// cmdVisibility drives the visibility-policy disposition flow: by default a
+// read-only scan of records above the cap (通知录入者 basis); --enforce runs
+// the sweep (flag 待调整 / clear owner-fixed / timeout auto-downgrade).
+func cmdVisibility(args []string) error {
+	fs := flag.NewFlagSet("visibility", flag.ContinueOnError)
+	enforce := fs.Bool("enforce", false, "run the disposition sweep (flag/downgrade) instead of a read-only scan")
+	maxLevel := fs.Int("max-level", -1, "policy cap (highest allowed visibility level); default = tier setting")
+	bufferDays := fs.Int("buffer-days", 0, "buffer days before auto-downgrade (default 7)")
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+
+	if *enforce {
+		body := map[string]any{}
+		if *maxLevel >= 0 {
+			body["max_level"] = *maxLevel
+		}
+		if *bufferDays > 0 {
+			body["buffer_days"] = *bufferDays
+		}
+		rb, _ := json.Marshal(body)
+		resp, err := http.Post(apiBase()+"/api/v1/visibility/enforce", "application/json", bytes.NewReader(rb))
+		if err != nil {
+			return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return decodeAPIError(resp)
+		}
+		var rep struct {
+			Policy     supplierPolicy        `json:"policy"`
+			Flagged    int                   `json:"flagged"`
+			Pending    int                   `json:"pending"`
+			Appealed   int                   `json:"appealed"`
+			Downgraded int                   `json:"downgraded"`
+			Resolved   int                   `json:"resolved"`
+			Items      []visibilityViolation `json:"items"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
+			return err
+		}
+		if *asJSON {
+			return json.NewEncoder(os.Stdout).Encode(rep)
+		}
+		fmt.Printf("可见性处置完成（最高允许等级 %d，缓冲 %d 天）：\n", rep.Policy.MaxLevel, rep.Policy.BufferDays)
+		fmt.Printf("  新标记待调整 %d  ｜ 缓冲期中 %d  ｜ 申诉中 %d  ｜ 超时自动降级 %d  ｜ 自行调整已解除 %d\n",
+			rep.Flagged, rep.Pending, rep.Appealed, rep.Downgraded, rep.Resolved)
+		printVisibilityRows(rep.Items)
+		return nil
+	}
+
+	// Read-only scan.
+	q := url.Values{}
+	if *maxLevel >= 0 {
+		q.Set("max_level", fmt.Sprintf("%d", *maxLevel))
+	}
+	if *bufferDays > 0 {
+		q.Set("buffer_days", fmt.Sprintf("%d", *bufferDays))
+	}
+	resp, err := http.Get(apiBase() + "/api/v1/visibility/violations?" + q.Encode())
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var rep struct {
+		Policy supplierPolicy        `json:"policy"`
+		Count  int                   `json:"count"`
+		Items  []visibilityViolation `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	}
+	if rep.Count == 0 {
+		fmt.Printf("(no visibility violations — all records at or below level %d)\n", rep.Policy.MaxLevel)
+		return nil
+	}
+	fmt.Printf("可见性策略：最高允许等级 %d。以下 %d 条记录不合规：\n", rep.Policy.MaxLevel, rep.Count)
+	printVisibilityRows(rep.Items)
+	fmt.Fprintln(os.Stderr, "\n提示：加 --enforce 执行处置（新违规标记\"待调整\"并给予 7 天缓冲，超时自动降级）。")
+	return nil
+}
+
+// supplierPolicy mirrors supplier.VisibilityPolicy JSON.
+type supplierPolicy struct {
+	MaxLevel   int `json:"max_level"`
+	BufferDays int `json:"buffer_days"`
+}
+
+// printVisibilityRows renders the violation/enforce item list as a CJK-aligned table.
+func printVisibilityRows(items []visibilityViolation) {
+	if len(items) == 0 {
+		return
+	}
+	rows := [][]string{{"状态", "剩余时间", "截止日", "可见性", "供应商", "地域", "录入人"}}
+	for _, v := range items {
+		deadline := ""
+		if v.Deadline != nil {
+			deadline = v.Deadline.Format("2006-01-02")
+		}
+		rows = append(rows, []string{
+			visStateLabel(v.State),
+			visDaysLabel(v.State, v.DaysLeft),
+			deadline,
+			fmt.Sprintf("L%d→L%d", v.Visibility, v.MaxLevel),
+			truncateCell(v.SupplierName, 22),
+			truncateCell(strings.TrimSpace(v.Province+" "+v.City), 12),
+			truncateCell(v.Owner, 10),
+		})
+	}
+	printTable(rows)
+}
+
+func visStateLabel(state string) string {
+	switch state {
+	case "overdue":
+		return "✗ 已超期"
+	case "appealed":
+		return "⏸ 申诉中"
+	case "pending":
+		return "! 待调整"
+	default:
+		return "新发现"
+	}
+}
+
+func visDaysLabel(state string, days int) string {
+	switch state {
+	case "appealed":
+		return "倒计时暂停"
+	case "overdue":
+		return fmt.Sprintf("已超期 %d 天", -days)
+	case "pending":
+		if days == 0 {
+			return "今天截止"
+		}
+		return fmt.Sprintf("%d 天后", days)
+	default:
+		return "-"
+	}
+}
+
+// cmdAppeal handles both sides of the appeal flow (申诉): file=true is the
+// owner filing an appeal (pauses the downgrade countdown); file=false is the
+// admin resolving it (--grant = exception, --deny = immediate downgrade).
+func cmdAppeal(args []string, file bool) error {
+	fs := flag.NewFlagSet("appeal", flag.ContinueOnError)
+	note := fs.String("note", "", "appeal reason (filing) or unused on resolve")
+	grant := fs.Bool("grant", false, "resolve: 申诉成立 — keep the level as an approved exception")
+	deny := fs.Bool("deny", false, "resolve: 驳回 — downgrade to the policy cap immediately")
+	maxLevel := fs.Int("max-level", -1, "resolve: policy cap override")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		return fmt.Errorf("appeal requires a supplier id")
+	}
+	id := fs.Arg(0)
+
+	var urlPath string
+	var body map[string]any
+	if file {
+		urlPath = "/appeal-visibility"
+		body = map[string]any{"note": *note}
+	} else {
+		if *grant == *deny { // both set or neither set
+			return fmt.Errorf("resolve-appeal requires exactly one of --grant or --deny")
+		}
+		urlPath = "/resolve-visibility-appeal"
+		body = map[string]any{"grant": *grant}
+		if *maxLevel >= 0 {
+			body["max_level"] = *maxLevel
+		}
+	}
+	rb, _ := json.Marshal(body)
+	resp, err := http.Post(
+		apiBase()+"/api/v1/suppliers/"+url.PathEscape(id)+urlPath,
+		"application/json", bytes.NewReader(rb))
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var doc domain.Supplier
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return err
+	}
+	if file {
+		fmt.Printf("appealed %s  %s → 申诉已提交，自动降级倒计时暂停，等待管理员裁决。\n", doc.ID, doc.BasicInfo.CompanyName)
+	} else if *grant {
+		fmt.Printf("granted %s  %s → 申诉成立：保留可见性等级 L%d（管理员批准的例外）。\n",
+			doc.ID, doc.BasicInfo.CompanyName, doc.Visibility)
+	} else {
+		fmt.Printf("denied %s  %s → 申诉驳回：已立即降级到 L%d。\n",
+			doc.ID, doc.BasicInfo.CompanyName, doc.Visibility)
+	}
 	return nil
 }
 

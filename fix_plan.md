@@ -9,23 +9,81 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    但本机无 Rust 工具链，未跑过 `tauri build`；需在有 Rust 的机器执行
    `scripts/build-sidecar.sh && cd src-tauri && tauri build`，验证安装包体积（目标 ~15MB）
    与双击拉起 sidecar。图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。
-2. **可见性策略收紧流程**：个人版只需 0/1 两级的数据处置骨架（扫描不合规 → 通知录入者
-   → 缓冲标记"待调整" → 超时降级）。当前可见性字段/校验已在，缺策略执行流程。
-3. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
+2. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
    Meilisearch 是 Rust 独立 server 二进制、无可内嵌 Go 库，塞进个人版会破坏"单二进制
    零外部依赖 / ~15MB"硬约束。个人版搜索继续用 SQLite FTS5（已在 `search.Index` 接口
    之后，行为被测试钉住）；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）
    实现同一接口，届时照 FTS5 测试对照即可。
-4. **Excel 导入逐行查重 + 合并**：录入去重原语 `CheckDuplicates` 已落地（手动表单/CLI/MCP
+3. **Excel 导入逐行查重 + 合并**：录入去重原语 `CheckDuplicates` 已落地（手动表单/CLI/MCP
    都用上了），批量导入尚未接入——ImportReport 可加 duplicates 维度，命中行提示/可跳过；
-   人工"合并重复供应商"流程也基于同一原语。
-5. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
+   人工"合并重复供应商"流程也基于同一原语。可见性处置原语已就位，Excel 导入若未来带
+   可见性策略也可复用同一 `EnforceVisibilityPolicy`。
+4. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
    保留不被引擎覆盖）。黑名单生命周期已落地（见下）；外部数据"被执行人→自动预警"可后挂。
-
-5. srm-mcp 打包/分发：`go build -tags personal` 已出独立 stdio 二进制约 12MB，后续
+5. **可见性策略配置 UI + 定时处置**：处置状态机/API/CLI/MCP/前端徽标已落地（见下）。
+   尚缺：管理员"最高可见等级"配置界面（当前经 CLI/API `--max-level` 传参，默认取版本
+   FeatureFlag `visibility_levels-1`）、开机/每日定时跑 enforce（当前手动触发；个人版
+   可在 sidecar 起一个日级 ticker）。企业版通知服务把扫描报告推钉钉/企微的接口已用
+   同一 `VisibilityViolation` 形状预留。
+6. srm-mcp 打包/分发：`go build -tags personal` 已出独立 stdio 二进制约 12MB，后续
    可纳入 scripts 构建/发布产物，随桌面版分发或单独提供（MCP 主机配置 command 即 srm-mcp）。
 
 ## 已完成
+
+### 2026-09-08：可见性策略收紧数据处置流程（五级权限体系收尾）——策略收紧骨架
+
+补齐 PRD 核心功能 #2 的最后一环：**策略收紧时的数据处置流程**（扫描不合规 → 通知录入者
+→ 7 天缓冲标记"待调整" → 超时自动降级 → 支持申诉）。可见性字段/校验早已在库，本环把
+"管理员调低最高可见等级后，存量超范围记录怎么办"做成完整状态机。个人版只跑 0/1 两级
+（cap=1），但状态机 tier 无关，企业版同一份代码跑全五级。纯本地，无 AI。
+
+- **数据模型**（`domain`）：
+  - `Supplier.VisEnforcement *VisibilityEnforcement`（处置子文档，**不是状态变更**——
+    缓冲期内供应商仍可见可用）：`pending_adjustment / flagged_at / deadline /
+    previous_visibility / reason` + 申诉字段 `appealed / appeal_note / appealed_at`。
+    合规后整体移除；每次跃迁写 change_log。
+  - `Supplier.VisException bool`：申诉成立的管理员例外（可保留超 cap 等级）；**下次编辑
+    可见性即清除**（例外只针对被批准的那个等级，不跟随后续修改）。
+  - `Summary.VisPending` 列表徽标位；新增 change_log 来源 `SourceSystem`（系统自动执行）。
+- **服务层**（`internal/supplier/visibility.go`）：
+  - `VisibilityPolicy{MaxLevel, BufferDays}` 由接入层传入（admin/flag → HTTP/CLI），业务
+    代码不直接读版本配置；`normalized()` 钳制 0-4、缓冲默认 7 天。
+  - `ScanVisibilityViolations(ctx, policy)`：只读扫描（keyset 分页，同 Export 走法），
+    返回每条不合规记录的处置状态 `violation|pending|appealed|overdue` + 剩余天数，按紧迫
+    度排序。这是"扫描/通知录入者"的负载（企业版通知服务推同一形状）。
+  - `EnforceVisibilityPolicy(ctx, policy)`：一次处置 sweep——①未标记的新违规→标记待调整、
+    deadline=now+缓冲；②缓冲期内录入者已自行降到合规→清标记(resolved，不降级)；③到期且
+    未申诉→自动降级到 cap（最近合规等级）；④已申诉→倒计时暂停不动；⑤申诉成立例外→跳过。
+    幂等：重复跑只重计状态。报告含 flagged/pending/appealed/downgraded/resolved 计数 +
+    剩余待处理列表。
+  - `AppealVisibility(id, note)`：录入者申诉，暂停倒计时（幂等）。
+  - `ResolveVisibilityAppeal(id, grant, policy)`：管理员裁决——grant=成立保留等级并打例外
+    标记；deny=驳回立即降级到 cap。
+  - Update 路径：编辑 visibility 时自动清 `VisException`。
+- **API**：`GET /api/v1/visibility/violations`（只读扫描）、`POST /api/v1/visibility/enforce`
+  （处置 sweep，body/query 可带 `max_level`/`buffer_days`，默认取版本 cap）、
+  `POST /suppliers/{id}/appeal-visibility`（body `{note}` 或 `?note=`）、
+  `POST /suppliers/{id}/resolve-visibility-appeal`（`{grant}` 或 `?grant=true|false`）。
+- **CLI**：`srm-cli visibility [--enforce] [--max-level N] [--buffer-days N] [--json]`
+  （默认只读扫描，CJK 等宽表格：状态/剩余时间/截止日/L旧→L新/供应商/地域/录入人）；
+  `srm-cli appeal <id> [--note ...]`；`srm-cli resolve-appeal <id> --grant|--deny`。
+- **MCP**：新增只读工具 `visibility_violations`（Agent 只报告、提示录入者，**不自动处置/
+  降级/裁决**——这些是管理员动作，经 CLI/后台）；Skill 文档同步该工具与边界。
+- **前端**：列表卡片琥珀色 `⏳ 待调整` 徽标；详情页琥珀横幅（当前可见范围超上限 + 截止日
+  + 申诉理由 + `我要申诉`/`去调整可见范围` 按钮，申诉后显示"倒计时暂停待裁决"）；申诉成立
+  显示绿色例外横幅。
+- 测试：`supplier/visibility_test.go` 4 例（用可冻结时钟）——①扫描→标记(7天缓冲,可见性
+  不变,change_log/徽标)→同日幂等→第 8 天超时自动降级到 cap；②申诉暂停倒计时(30 天后仍不
+  降级)→grant 成立打例外(后续 sweep 跳过)→编辑可见性后例外失效重新入流程；③deny 立即降级
+  + 无申诉/无待调整时调用报错；④缓冲期内自行降级→下次 sweep resolved 清标记。全量
+  `go test` 默认+personal 全绿，enterprise/personal 编译通过；前端 tsc 通过。
+- E2E（personal/SQLite，sidecar + CLI）：建 L4 违规 + L0 合规 → 只读扫描命中 1 条"新发现"
+  → enforce 标记"待调整"截止 2026-09-15 → appeal 后扫描变"⏸ 申诉中 倒计时暂停"→
+  resolve --grant 保留 L4（例外）扫描清空；另建 L4/L3 → appeal 后 --deny 立即降到 L1；
+  L3 自行 PATCH 到 L0 后 enforce 显示"自行调整已解除 1"；最终扫描 0 条。MCP stdio
+  `visibility_violations` 注册并返回。
+- **待办（后挂）**：管理员可见性策略配置 UI、sidecar 日级定时 enforce、企业版通知推送
+  （负载形状已留）。
 
 ### 2026-09-08：录入去重（非 AI 重复检测）——录入阶段防重复建库
 

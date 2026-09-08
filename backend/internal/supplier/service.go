@@ -167,6 +167,12 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*domai
 		}
 		addChange(diffField("visibility", doc.Visibility, *in.Visibility, now, in.Source))
 		doc.Visibility = *in.Visibility
+		// A policy exception (申诉成立) applied to the previously approved
+		// level — a subsequent edit picks a new level and must re-earn it.
+		if doc.VisException {
+			addChange(diffField("vis_exception", true, false, now, in.Source))
+			doc.VisException = false
+		}
 	}
 	if in.SharedWith != nil {
 		addChange(diffField("shared_with", doc.SharedWith, *in.SharedWith, now, in.Source))

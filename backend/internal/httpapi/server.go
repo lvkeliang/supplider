@@ -28,6 +28,12 @@
 //	                                           (same filters as list)
 //	GET    /api/v1/reminders/expiring?within=90  qualification expiry scan
 //	                                           (90/30/7-day windows + expired)
+//	GET    /api/v1/visibility/violations      visibility policy scan (read-only)
+//	POST   /api/v1/visibility/enforce         run the 待调整→downgrade sweep
+//	POST   /api/v1/suppliers/{id}/appeal-visibility
+//	                                         owner appeals a 待调整 flag (pauses countdown)
+//	POST   /api/v1/suppliers/{id}/resolve-visibility-appeal
+//	                                         admin grants (exception) or denies (downgrade)
 package httpapi
 
 import (
@@ -99,6 +105,10 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/import/commit", s.handleImportCommit)
 	s.Mux.HandleFunc("GET /api/v1/export", s.handleExport)
 	s.Mux.HandleFunc("GET /api/v1/reminders/expiring", s.handleExpiringReminders)
+	s.Mux.HandleFunc("GET /api/v1/visibility/violations", s.handleVisibilityViolations)
+	s.Mux.HandleFunc("POST /api/v1/visibility/enforce", s.handleVisibilityEnforce)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/appeal-visibility", s.handleAppealVisibility)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/resolve-visibility-appeal", s.handleResolveVisibilityAppeal)
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -634,6 +644,165 @@ func (s *Server) handleExpiringReminders(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusOK, rep)
+}
+
+// ---------- visibility policy enforcement (可见性策略收紧) ----------
+
+// visibilityPolicy builds the policy from request params, defaulting to the
+// tier's enabled levels (personal: 0/1 → cap 1) and the PRD 7-day buffer.
+func (s *Server) visibilityPolicy(maxLevel int, hasMax bool, bufferDays int) supplier.VisibilityPolicy {
+	p := supplier.VisibilityPolicy{BufferDays: bufferDays}
+	if hasMax {
+		p.MaxLevel = maxLevel
+	} else {
+		// featureflag.VisibilityLevels counts enabled levels; the highest
+		// legal level is count-1 (personal = 2 levels → cap 1).
+		p.MaxLevel = s.Features.VisibilityLevels - 1
+	}
+	return p
+}
+
+// policyParams reads optional max_level / buffer_days overrides from a JSON
+// body and/or the query string (body wins for JSON callers). A missing/empty
+// body is fine — all fields are optional.
+func policyParams(w http.ResponseWriter, r *http.Request) (maxLevel int, hasMax bool, bufferDays int) {
+	q := r.URL.Query()
+	if v := q.Get("max_level"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			maxLevel, hasMax = n, true
+		}
+	}
+	if v := q.Get("buffer_days"); v != "" {
+		bufferDays, _ = strconv.Atoi(v)
+	}
+	if r.Body != nil {
+		var body struct {
+			MaxLevel   *int `json:"max_level"`
+			BufferDays *int `json:"buffer_days"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err == nil {
+			if body.MaxLevel != nil {
+				maxLevel, hasMax = *body.MaxLevel, true
+			}
+			if body.BufferDays != nil {
+				bufferDays = *body.BufferDays
+			}
+		}
+	}
+	return maxLevel, hasMax, bufferDays
+}
+
+// visibilityReport is the GET .../violations payload: the read-only scan
+// (通知录入者 basis), most urgent first.
+type visibilityReport struct {
+	GeneratedAt time.Time                      `json:"generated_at"`
+	Policy      supplier.VisibilityPolicy      `json:"policy"`
+	Count       int                            `json:"count"`
+	Items       []supplier.VisibilityViolation `json:"items"`
+}
+
+// handleVisibilityViolations answers the read-only policy scan: every live
+// supplier above the visibility cap, annotated with disposition state
+// (violation / pending / appealed / overdue).
+func (s *Server) handleVisibilityViolations(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	maxLevel, hasMax := 0, false
+	if v := q.Get("max_level"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			maxLevel, hasMax = n, true
+		}
+	}
+	bufferDays := 0
+	if v := q.Get("buffer_days"); v != "" {
+		bufferDays, _ = strconv.Atoi(v)
+	}
+	policy := s.visibilityPolicy(maxLevel, hasMax, bufferDays)
+	items, err := s.Service.ScanVisibilityViolations(r.Context(), policy)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, visibilityReport{
+		GeneratedAt: time.Now().UTC(),
+		Policy:      policy,
+		Count:       len(items),
+		Items:       items,
+	})
+}
+
+// handleVisibilityEnforce runs one disposition sweep (数据处置): new
+// violators are flagged 待调整 with a 7-day deadline, owners who already
+// fixed their level are cleared, and overdue un-appealed records are
+// auto-downgraded to the cap. Returns the sweep report.
+func (s *Server) handleVisibilityEnforce(w http.ResponseWriter, r *http.Request) {
+	policy := s.visibilityPolicy(policyParams(w, r))
+	rep, err := s.Service.EnforceVisibilityPolicy(r.Context(), policy)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
+// handleAppealVisibility files an owner appeal (申诉) against a pending
+// visibility adjustment, pausing the auto-downgrade countdown. Body is
+// optional: {"note": "..."} (also accepted via ?note=).
+func (s *Server) handleAppealVisibility(w http.ResponseWriter, r *http.Request) {
+	note := r.URL.Query().Get("note")
+	if r.Body != nil {
+		var body struct {
+			Note string `json:"note"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
+		if strings.TrimSpace(body.Note) != "" {
+			note = body.Note
+		}
+	}
+	doc, err := s.Service.AppealVisibility(r.Context(), r.PathValue("id"), note)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+// resolveAppealRequest is the POST .../resolve-visibility-appeal body.
+type resolveAppealRequest struct {
+	Grant      bool `json:"grant"`       // true=申诉成立(例外保留) false=驳回(立即降级)
+	MaxLevel   *int `json:"max_level"`   // optional policy override
+	BufferDays int  `json:"buffer_days"` // optional policy override
+}
+
+// handleResolveVisibilityAppeal is the admin decision on an open appeal:
+// grant keeps the level as an approved exception; deny downgrades to the
+// policy cap immediately.
+func (s *Server) handleResolveVisibilityAppeal(w http.ResponseWriter, r *http.Request) {
+	var req resolveAppealRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+	}
+	// Grant may also arrive as ?grant=true|false (CLI convenience). An
+	// explicit body field wins; otherwise the query decides.
+	grant := req.Grant
+	if q := r.URL.Query().Get("grant"); q != "" {
+		switch strings.ToLower(strings.TrimSpace(q)) {
+		case "true", "1", "yes", "grant":
+			grant = true
+		case "false", "0", "no", "deny":
+			grant = false
+		}
+	}
+	maxLevel, hasMax := 0, req.MaxLevel != nil
+	if req.MaxLevel != nil {
+		maxLevel = *req.MaxLevel
+	}
+	policy := s.visibilityPolicy(maxLevel, hasMax, req.BufferDays)
+	doc, err := s.Service.ResolveVisibilityAppeal(r.Context(), r.PathValue("id"), grant, policy)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
 }
 
 // ---------- shell-company risk (空壳特征检测, non-AI) ----------
