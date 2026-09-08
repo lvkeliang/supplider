@@ -31,6 +31,15 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-08：补齐项目 README（三种使用方式 / CLI / 数据备份 / 架构红线）
+
+仓库 README 原本只有一行标题。个人版 MVP 功能已闭环，补上面向用户与贡献者的
+入口文档：桌面打包（build-frontend/build-sidecar + tauri build，需 Rust）、
+从源码运行（`go run -tags personal ./cmd/suppliderd` + `vite dev`，并注明无
+tag 默认是内存沙箱不落盘）、CLI/MCP（链 SETUP.md / skill 文档）、CLI 命令速览、
+三系统数据目录与备份恢复、目录结构与三条架构红线（接口先行/AI 可降级/个人版
+零依赖）、测试命令（默认/personal/enterprise）。
+
 ### 2026-09-08：修复 Tauri 打包后前端连不上 sidecar（API base 运行时检测）
 
 静态审计 Tauri 打包配置时发现一个会导致**打包后双击应用"后端未连接"**的真实
