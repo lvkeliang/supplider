@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, apiUrl } from '../api'
-import type { RiskReport, RiskSignal, Supplier } from '../types'
+import type { DuplicateMatch, RiskReport, RiskSignal, Supplier } from '../types'
 import { STATUS_ARCHIVED, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import { DocumentCard, Field } from './Card'
 import type { Go } from '../App'
@@ -40,6 +40,10 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [reviewing, setReviewing] = useState(false)
+  // 合并重复档案选择器：从查重结果里直接挑选要并入的档案（手输 id 仅作兜底）。
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [mergeCandidates, setMergeCandidates] = useState<DuplicateMatch[] | null>(null)
+  const [mergeManualId, setMergeManualId] = useState('')
 
   const load = useCallback(() => {
     api
@@ -131,27 +135,56 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     }
   }
 
-  // 合并重复供应商：把另一条档案并入当前档案（当前档案保留身份，并入对方的
-  // 绩效/附件/资质/品类/产品线/自定义字段），对方随后归档。黑名单/归档记录会
-  // 被服务端拒绝。用于清理历史重复录入。
-  const mergeDuplicate = async () => {
-    const other = prompt('输入要并入本档案的【重复供应商 id】（sup_ 开头，可在列表/查重结果中找到）。\n该供应商的绩效/附件/资质等将并入当前档案，然后被归档：')
-    if (other === null || other.trim() === '') return
-    const dupId = other.trim()
+  // 合并重复供应商：打开选择器并用当前档案的公司名/信用代码跑录入查重，把
+  // 疑似同一主体的档案列出来直接挑选（当前档案保留身份，并入对方的绩效/
+  // 附件/资质/品类/产品线/自定义字段，对方随后归档）。黑名单/归档记录服务端
+  // 拒绝，故在列表中禁用并说明。用于清理历史重复录入。
+  const openMerge = async () => {
+    if (mergeOpen) {
+      setMergeOpen(false)
+      return
+    }
+    setMergeOpen(true)
+    setError('')
+    setMergeCandidates(null)
+    setMergeManualId('')
+    try {
+      const res = await api.checkDuplicates({
+        name: doc?.basic_info.company_name,
+        credit_code: doc?.basic_info.credit_code,
+        province: doc?.basic_info.region.province,
+        city: doc?.basic_info.region.city,
+      })
+      // The scan matches the current record itself (same name/code); the
+      // master cannot be merged into itself.
+      setMergeCandidates(res.matches.filter((m) => m.supplier_id !== id))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setMergeCandidates([])
+    }
+  }
+
+  const doMerge = async (dup: DuplicateMatch | { supplier_id: string; name: string }) => {
+    const dupId = dup.supplier_id.trim()
     if (dupId === id) {
       setError('不能与自身合并')
       return
     }
-    if (!confirm(`确认将 ${dupId} 并入当前档案？\n· 当前档案保留，吸收对方的绩效/附件/资质/品类/自定义字段（冲突时以当前档案为准）\n· ${dupId} 将被归档（历史保留，列表默认隐藏）\n该操作不可撤销。`)) {
+    if (!confirm(
+      `确认将「${dup.name}」（${dupId}）并入当前档案？\n` +
+      '· 当前档案保留，吸收对方的绩效/附件/资质/品类/自定义字段（冲突时以当前档案为准）\n' +
+      `· 「${dup.name}」将被归档（历史保留，列表默认隐藏）\n该操作不可撤销。`,
+    )) {
       return
     }
     setBusy(true)
     setError('')
     try {
       const res = await api.mergeSuppliers(id, dupId)
+      setMergeOpen(false)
       load()
       const m = res.merged
-      alert(`合并完成：并入绩效 ${m.performance_added}、附件 ${m.attachments_added}、资质 ${m.qualifications_added}、品类 ${m.categories_added} 条；${dupId} 已归档。`)
+      alert(`合并完成：并入绩效 ${m.performance_added}、附件 ${m.attachments_added}、资质 ${m.qualifications_added}、品类 ${m.categories_added} 条；「${dup.name}」已归档。`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -231,7 +264,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                 <button className="btn-primary" disabled={busy} onClick={unblacklist}>移出黑名单</button>
               ) : (
                 <>
-                  <button className="btn-ghost" disabled={busy} onClick={mergeDuplicate} title="把另一条重复档案并入当前档案（并入绩效/附件/资质等，对方归档），用于清理历史重复录入">🔀 合并重复</button>
+                  <button className="btn-ghost" disabled={busy} onClick={openMerge} title="把另一条重复档案并入当前档案（并入绩效/附件/资质等，对方归档），用于清理历史重复录入">🔀 合并重复</button>
                   <button className="btn-ghost" disabled={busy} onClick={blacklist} title="列入黑名单（淘汰/禁用）：仍可搜到但醒目标记">🚫 列入黑名单</button>
                   <button className="btn-danger" disabled={busy} onClick={archive}>归档</button>
                 </>
@@ -240,6 +273,100 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
           )}
         </div>
       </div>
+
+      {/* 合并重复档案选择器：查重候选 + 手动 id 兜底 */}
+      {mergeOpen && (
+        <div className="rounded-lg border border-slate-300 bg-white px-4 py-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-800">选择要并入的重复档案</h3>
+            <button className="text-sm text-slate-400 hover:text-slate-600" onClick={() => setMergeOpen(false)}>
+              取消
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            按当前档案的公司名/信用代码查重；并入后对方的绩效/附件/资质/品类/自定义字段合并到本档案，对方归档（不可撤销）。
+          </p>
+
+          {mergeCandidates === null ? (
+            <p className="py-3 text-center text-sm text-slate-400">正在查重…</p>
+          ) : mergeCandidates.length === 0 ? (
+            <p className="py-3 text-sm text-slate-500">
+              未查到疑似重复档案。如确需合并，可在下方手动输入对方档案 id（sup_ 开头）。
+            </p>
+          ) : (
+            <ul className="mt-2 divide-y divide-slate-100">
+              {mergeCandidates.map((m) => {
+                const blocked =
+                  m.status === STATUS_BLACKLISTED
+                    ? '黑名单记录不可合并（确认造假的档案不能并入其他档案），请先移出黑名单'
+                    : m.status === STATUS_ARCHIVED
+                      ? '该档案已归档，请先恢复后再合并'
+                      : ''
+                return (
+                  <li key={m.supplier_id} className="flex items-center gap-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="truncate text-sm font-medium text-slate-800">{m.name}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs ${
+                            m.level === 'strong' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
+                          }`}
+                        >
+                          {m.level === 'strong' ? '确凿·信用代码一致' : '疑似·同名'}
+                        </span>
+                        {m.status === STATUS_BLACKLISTED && (
+                          <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">🚫 黑名单</span>
+                        )}
+                        {m.status === STATUS_ARCHIVED && (
+                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600">已归档</span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate text-xs text-slate-400">
+                        <span className="font-mono">{m.supplier_id}</span>
+                        {m.province || m.city ? (
+                          <span> · {[m.province, m.city].filter(Boolean).join(' ')}</span>
+                        ) : null}
+                        {m.reason ? <span> · {m.reason}</span> : null}
+                      </div>
+                    </div>
+                    {blocked ? (
+                      <span className="shrink-0 text-xs text-slate-400" title={blocked}>
+                        不可合并
+                      </span>
+                    ) : (
+                      <button
+                        className="btn-ghost shrink-0 px-2 py-1 text-xs"
+                        disabled={busy}
+                        onClick={() => doMerge(m)}
+                        title="把该档案并入当前档案，然后归档该档案"
+                      >
+                        并入此档案
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {/* 兜底：查重未覆盖时手动输入 id */}
+          <div className="mt-2 flex items-center gap-2 border-t border-slate-100 pt-2">
+            <input
+              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              placeholder="手动输入重复档案 id（sup_ 开头）"
+              value={mergeManualId}
+              onChange={(e) => setMergeManualId(e.target.value)}
+            />
+            <button
+              className="btn-ghost shrink-0 px-2 py-1 text-xs"
+              disabled={busy || mergeManualId.trim() === ''}
+              onClick={() => doMerge({ supplier_id: mergeManualId, name: mergeManualId.trim() })}
+            >
+              按 id 合并
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 黑名单横幅（淘汰/禁用） */}
       {blacklisted && (
