@@ -134,6 +134,8 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /api/v1/visibility/policy", s.handleGetVisibilityPolicy)
 	s.Mux.HandleFunc("PUT /api/v1/visibility/policy", s.handleSaveVisibilityPolicy)
 	s.Mux.HandleFunc("POST /api/v1/visibility/policy", s.handleSaveVisibilityPolicy)
+	s.Mux.HandleFunc("GET /api/v1/preferences/local", s.handleGetLocalPreference)
+	s.Mux.HandleFunc("PUT /api/v1/preferences/local", s.handleSaveLocalPreference)
 	s.Mux.HandleFunc("GET /api/v1/visibility/violations", s.handleVisibilityViolations)
 	s.Mux.HandleFunc("POST /api/v1/visibility/enforce", s.handleVisibilityEnforce)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/appeal-visibility", s.handleAppealVisibility)
@@ -675,6 +677,12 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		Sort:   datamodel.Sort{Field: datamodel.SortField(q.Get("sort")), Order: datamodel.SortOrder(q.Get("order"))},
 		Filter: filterFromQuery(q),
 	}
+	// prefer=0/false/off temporarily disables the saved home-region
+	// ranking for this query (the list-page "本地优先" switch).
+	switch q.Get("prefer") {
+	case "0", "false", "off", "no":
+		query.NoLocalPreference = true
+	}
 
 	page, err := s.Service.List(r.Context(), query)
 	if err != nil {
@@ -713,6 +721,8 @@ func filterFromQuery(q url.Values) datamodel.SupplierFilter {
 		Status:          q.Get("status"),
 		IncludeArchived: q.Get("include_archived") == "true" || q.Get("include_archived") == "1",
 		Keyword:         q.Get("q"),
+		PreferProvince:  q.Get("prefer_province"),
+		PreferCity:      q.Get("prefer_city"),
 	}
 }
 
@@ -903,6 +913,69 @@ func (s *Server) handleSaveVisibilityPolicy(w http.ResponseWriter, r *http.Reque
 		"policy":     policy,
 		"configured": true,
 		"report":     rep,
+	})
+}
+
+// ---------- local preference (本地供应商偏好) ----------
+
+// localPreferenceRequest is the PUT body for the home region.
+type localPreferenceRequest struct {
+	Province string `json:"province"`
+	City     string `json:"city"`
+}
+
+// localPreferenceResponse is the GET/PUT payload: the preference plus a
+// configured flag (a province-less preference means local-first is off).
+type localPreferenceResponse struct {
+	Province   string `json:"province"`
+	City       string `json:"city,omitempty"`
+	Configured bool   `json:"configured"`
+}
+
+func (s *Server) handleGetLocalPreference(w http.ResponseWriter, r *http.Request) {
+	p, err := s.Service.LoadLocalPreference(r.Context())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, localPreferenceResponse{
+		Province: p.Province, City: p.City, Configured: !p.Empty(),
+	})
+}
+
+func (s *Server) handleSaveLocalPreference(w http.ResponseWriter, r *http.Request) {
+	var req localPreferenceRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+	}
+	if v := r.URL.Query().Get("province"); v != "" {
+		req.Province = v
+	}
+	if v := r.URL.Query().Get("city"); v != "" {
+		req.City = v
+	}
+	// ?clear=1 removes the preference (local-first ranking off).
+	if r.URL.Query().Get("clear") == "1" || r.URL.Query().Get("clear") == "true" {
+		if err := s.Service.ClearLocalPreference(r.Context()); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, localPreferenceResponse{})
+		return
+	}
+	if strings.TrimSpace(req.Province) == "" {
+		writeError(w, http.StatusBadRequest, "province is required (PUT ?clear=1 to remove the preference)")
+		return
+	}
+	p, err := s.Service.SaveLocalPreference(r.Context(), supplier.LocalPreference{
+		Province: req.Province, City: req.City,
+	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, localPreferenceResponse{
+		Province: p.Province, City: p.City, Configured: true,
 	})
 }
 

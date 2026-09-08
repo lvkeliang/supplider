@@ -36,6 +36,7 @@ func RunSupplierStoreTests(t *testing.T, newStore NewStore) {
 	t.Run("DeleteIsArchive", func(t *testing.T) { testDeleteIsArchive(t, newStore()) })
 	t.Run("DeleteNotFound", func(t *testing.T) { testDeleteNotFound(t, newStore()) })
 	t.Run("PaginationKeyset", func(t *testing.T) { testPaginationKeyset(t, newStore()) })
+	t.Run("LocalPreferenceRanking", func(t *testing.T) { testLocalPreferenceRanking(t, newStore()) })
 	t.Run("LimitCappedAt100", func(t *testing.T) { testLimitCapped(t, newStore()) })
 	t.Run("FilterRegion", func(t *testing.T) { testFilterRegion(t, newStore()) })
 	t.Run("FilterCategories", func(t *testing.T) { testFilterCategories(t, newStore()) })
@@ -481,5 +482,100 @@ func testSettingsOverwrite(t *testing.T, st datamodel.SupplierStore) {
 func testSettingsMissingNotFound(t *testing.T, st datamodel.SupplierStore) {
 	if _, err := st.GetSetting(context.Background(), "never-written"); !errors.Is(err, datamodel.ErrNotFound) {
 		t.Errorf("missing setting must return ErrNotFound, got %v", err)
+	}
+}
+
+// testLocalPreferenceRanking pins the local-first ordering AND the
+// three-part keyset (local priority, sort column, id) used across pages:
+// local suppliers lead every page, no row is duplicated or skipped.
+func testLocalPreferenceRanking(t *testing.T, st datamodel.SupplierStore) {
+	ctx := context.Background()
+	// 5 local (杭州) + 5 same-province (宁波), interleaved creation times
+	// so date order alone would mix the regions.
+	docs := make([]*domain.Supplier, 0, 10)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 10; i++ {
+		city := "宁波"
+		if i%2 == 0 {
+			city = "杭州"
+		}
+		id := fmt.Sprintf("sup_local_%02d", i)
+		docs = append(docs, supplier(id, fmt.Sprintf("本地优先公司%02d", i),
+			"浙江", city, "user_a", withCreatedAt(base.Add(time.Duration(i)*time.Hour))))
+	}
+	// A third province must rank below even same-province docs.
+	docs = append(docs, supplier("sup_local_xx", "外省公司", "江苏", "南京", "user_a",
+		withCreatedAt(base.Add(20*time.Hour))))
+	mustPut(t, st, docs...)
+
+	isLocal := func(city, prov string) bool {
+		return datamodel.LocalPrio(prov, city, "浙江", "杭州") == 1
+	}
+
+	// Walk all pages with a small page size to exercise the keyset boundary.
+	seen := map[string]bool{}
+	cursor := ""
+	order := []string{}
+	for {
+		page, err := st.List(ctx, datamodel.Query{
+			Limit:  3,
+			Cursor: cursor,
+			Filter: datamodel.SupplierFilter{PreferProvince: "浙江", PreferCity: "杭州"},
+		})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		for _, it := range page.Items {
+			if seen[it.ID] {
+				t.Fatalf("row %s returned twice across pages", it.ID)
+			}
+			seen[it.ID] = true
+			order = append(order, it.BasicInfo.Region.City)
+		}
+		cursor = page.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+	if len(seen) != 11 {
+		t.Fatalf("walked %d distinct rows, want 11", len(seen))
+	}
+
+	// All 杭州 rows must precede every non-local row.
+	lastLocal := -1
+	firstNonLocal := len(order)
+	for i, c := range order {
+		if isLocal(c, "浙江") {
+			lastLocal = i
+		} else if firstNonLocal == len(order) {
+			firstNonLocal = i
+		}
+	}
+	if lastLocal >= firstNonLocal {
+		t.Fatalf("local-first violated: local rows end at %d but non-local starts at %d, order=%v",
+			lastLocal, firstNonLocal, order)
+	}
+	hcnt := 0
+	for _, c := range order {
+		if c == "杭州" {
+			hcnt++
+		}
+	}
+	if hcnt != 5 {
+		t.Errorf("expected 5 杭州 rows first, got %d (order=%v)", hcnt, order)
+	}
+
+	// Province-only preference (no city): both 杭州 and 宁波 rank above 江苏.
+	page, err := st.List(ctx, datamodel.Query{
+		Limit:  11,
+		Filter: datamodel.SupplierFilter{PreferProvince: "浙江"},
+	})
+	if err != nil {
+		t.Fatalf("province-only List: %v", err)
+	}
+	last := page.Items[len(page.Items)-1]
+	if last.BasicInfo.Region.Province != "江苏" {
+		t.Errorf("with province preference the out-of-province row must be last, got %s %s",
+			last.BasicInfo.Region.Province, last.ID)
 	}
 }

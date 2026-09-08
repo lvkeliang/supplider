@@ -31,6 +31,71 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：本地供应商偏好（本地优先排序）全链路——PRD 五大痛点之"本地偏好"
+
+产品立项五大痛点之一"本地供应商偏好"此前无落点。本环落地**常驻地域偏好**：
+设置后，列表/搜索结果中本地供应商**自动排最前（仅排序，外地供应商不被筛掉）**，
+配置随库备份，HTTP/CLI/MCP 三入口同源生效。纯本地、无 AI。
+
+- **数据模型层**（`datamodel.SupplierFilter`）：加 `PreferProvince/PreferCity`
+  排序提示（与地域过滤 `Province/City` 严格区分——提示不缩小结果集）；
+  `datamodel.LocalPrio(prov,city,prefProv,prefCity)` 是**唯一**优先级公式
+  （1=本地），两适配器必须一致；游标 `Cursor` 加 `Prio`，keyset 变为
+  **三元组**（prio, 排序键, id）。
+  - **SQLite**：ORDER BY `(CASE WHEN s.province=? AND (?='' OR s.city=?) THEN 1 ELSE 0 END) DESC`
+    前置；keyset 谓词 `(prio < cp) OR (prio = cp AND <原二元组尾部>)`，CASE 表达式
+    在谓词中重复两次、参数严格按占位符出现顺序绑定（prioArgs×2 + cp×2 + tail）。
+  - **memory**：`sortDocs` 签名加 filter，prio tier 优先、tier 内回退原排序；
+    desc/asc 两个方向都实现（asc 时本地 tier 仍居前）。
+  - **contract 套件**加 `LocalPreferenceRanking`（两适配器跑同一套）：5 杭州+5 宁波+
+    1 江苏，创建时间刻意交错，page size 3 走完全部分页——验证本地行全部在前、
+    **跨行不重不漏**（三元组 keyset 正确性）、省级偏好时两省内在先江苏垫底。
+- **服务层**（`internal/supplier/preference.go`）：`SaveLocalPreference/
+  LoadLocalPreference/ClearLocalPreference`（settings 键 `local_preference`，
+  复用既有 settings 缝，随库备份）；`Service.List` 在**业务层**自动把持久化偏好
+  填入 query（不是 HTTP 层——CLI/MCP/gRPC 同一行为）：显式 query 提示 > 已保存
+  偏好；`Query.NoLocalPreference` 单次关闭；损坏值回落空偏好不炸列表；每次列表
+  多一次单行主键查询。
+- **HTTP**：`GET/PUT /api/v1/preferences/local`（GET/PUT 回 `{province,city,
+  configured}`；空省份 400；`PUT ?clear=1` 清除）；列表加 `prefer=0` 关闭、
+  `prefer_province/prefer_city` 显式覆盖（MCP/高级调用可用）。
+- **CLI**：`srm-cli preference [--province 省 --city 市] [--clear] [--json]`
+  （别名 `pref`/`local`）；`list/search` 共享筛选 flag 加
+  `--prefer-province/--prefer-city/--no-local`；生效时 stderr 提示地域、
+  本地行前打 📍（显式 flag 与已保存偏好都计算）；白空格 `--province` 本地拦。
+- **MCP**：零改动自动生效（共用 Service.List）；Skill 文档加"本地优先排序"说明，
+  提示 Agent 优先解读排前的本地供应商，MCP 不提供修改入口。
+- **前端**：设置页新增「本地供应商偏好（本地优先）」卡片（省必填/市可选/清除/
+  configured 徽标/保存反馈）；列表页在已配置时显示「本地优先（浙江·杭州）」勾选
+  （单次关闭 → prefer=0），本地行打天蓝色「📍 本地」徽标。
+- 测试：`supplier/preference_test.go` 2 例（保存/加载/清除/损坏值回退；List 自动
+  应用、仅排序不筛选、opt-out 恢复日期序、显式提示覆盖保存值、省级偏好）；
+  contract +1（两适配器）。全量 `go test` 默认+personal 全绿，三 tag 编译通过，
+  前端 tsc+vite 通过。
+- E2E（personal/SQLite + 真实 HTTP + CLI + MCP stdio）：杭州(最早建)/宁波/
+  南京(最新建)——无偏好=日期序；城市偏好=杭州居首、南京仍在（只排序）；
+  `prefer=0` 恢复；FTS 关键词搜索同样本地优先；显式江苏提示覆盖；省级偏好
+  宁波杭州在前南京垫底；**limit=2 走 keyset 三页 3 行不重不漏**；空省份 400；
+  clear 恢复；CLI 📍/--no-local/--prefer-province 三况正确；MCP 搜索杭州居首。
+
+### 2026-09-09：修复供应商 ID 撞号静默覆盖（Create 重试本是死代码）
+
+实现本地偏好时跑全量测试偶现 `TestExportWalksAllPages` 204/205（memory 适配器），
+排查发现一个**真实数据安全缺陷**：供应商 ID = `sup_<年>_<6 位 crypto/rand>`
+（10⁶ 空间，生日悖论：~1.2k 行时撞号概率 50%，205 行热循环也有 ~2%）。Create 原有
+撞号重试循环只认 `datamodel.ErrConflict`，但接口规定 **Put 是 upsert**（Update 依赖
+该语义），memory 与 SQLite（`ON CONFLICT DO UPDATE`）**都不返回 ErrConflict**——
+撞号时 Put 直接**静默覆盖另一供应商整份文档**（被覆盖方从列表消失，其 id 变成新公司）。
+
+- **修复**（业务层，适配器无关；`service.go` Create）：写入前先 `Get(id)` 探测，
+  id 已存在（含已归档——id 永久不回收）则重新生成；非 ErrNotFound 错误直接返回；
+  Put 若收到 ErrConflict（未来适配器可能实现的多进程竞争）仍重试；5 次失败报错。
+  新增 `Service.WithIDGenerator` 测试缝（同 WithClock 模式）。
+- 测试：`supplier/id_collision_test.go` 2 例（确定性序列：首个 id 撞已存在供应商
+  → 重新生成且旧档字段完好；始终撞号 → 耗尽报错且不覆盖）。全量默认+personal 绿。
+- **教训记入踩坑 #5**：upsert 接口 + 随机 ID 时，唯一性必须由"知道 create vs update
+  语义的层"（服务层）保证，不能指望适配器报错。
+
 ### 2026-09-09：搜索/筛选延迟红线复测——5000 家库 p99 远低于 200ms/100ms
 
 PRD 性能红线"搜索响应 <200ms；条件查询 P99 <100ms"此前没有测试护栏。新增
@@ -805,6 +870,13 @@ JSON-RPC 2.0（无 SDK 依赖，保持个人版纯 Go 小二进制）。
    FTS content 直接复用，两路径行为一致。
 4. **测试夹具的地域要与名字一致**：fixture 默认地域是杭州，命名为"宁波建材贸易"的
    供应商若不显式设置 Region.City=宁波，"关键词 + 城市筛选 AND"的测试会假阳性通过/失败。
+5. **upsert 接口下随机 ID 的唯一性不能靠适配器**：`SupplierStore.Put` 契约是 upsert
+   （Update 需要），适配器永远不返回 ErrConflict；6 位随机后缀撞号时 Put 会静默覆盖
+   旧供应商。唯一性探测（Get→regenerate）必须放在知道 create/update 之别的服务层。
+   排查信号：memory 适配器热循环造数偶发少一行（TestExportWalksAllPages 204/205）。
+6. **本地优先是"排序提示"不是"过滤条件"**：放 `SupplierFilter.PreferProvince` 但绝不
+   进 WHERE——进了 WHERE 就变成只看本地供应商，与产品语义（外地仍可见，只是靠后）
+   相反；keyset 必须带上 prio 成为三元组，否则跨页边界会重行/漏行。
 
 ## 架构红线自查
 

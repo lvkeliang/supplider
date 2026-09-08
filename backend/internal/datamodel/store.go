@@ -62,6 +62,10 @@ type Query struct {
 	Limit int
 	// Cursor is the opaque NextCursor from the previous page; empty = first.
 	Cursor string
+	// NoLocalPreference turns OFF the persisted home-region preference
+	// (本地供应商偏好) for this query. Adapters ignore it; the service layer
+	// reads it before auto-filling Filter.PreferProvince/PreferCity.
+	NoLocalPreference bool
 }
 
 // SupplierFilter is the structured, multi-dimensional filter (条件筛选).
@@ -103,6 +107,12 @@ type SupplierFilter struct {
 	// lack a separate index — e.g. memory — may do simple substring
 	// matching so the CLI works without a search engine.
 	Keyword string
+
+	// PreferProvince/PreferCity rank same-region suppliers FIRST without
+	// filtering others out (本地供应商偏好). Empty province disables the
+	// preference; a province with empty city prefers the whole province.
+	PreferProvince string
+	PreferCity     string
 }
 
 // SortField enumerates sortable keys.
@@ -157,4 +167,21 @@ type Cursor struct {
 	// string, depending on Sort.Field.
 	SortKey string `json:"k"`
 	ID      string `json:"i"`
+	// Prio is the last row's local-preference priority (1 = local) when
+	// a PreferProvince/PreferCity hint is active; 0 otherwise. It lets
+	// the keyset predicate compare the leading local-first tier.
+	Prio int `json:"p,omitempty"`
+}
+
+// LocalPrio reports a supplier's local-preference priority: 1 when it lies
+// in the preferred region (province equal; city equal when a preferred city
+// is given), else 0. Same formula every adapter must use for ordering.
+func LocalPrio(prov, city, preferProv, preferCity string) int {
+	if preferProv == "" || prov != preferProv {
+		return 0
+	}
+	if preferCity != "" && city != preferCity {
+		return 0
+	}
+	return 1
 }

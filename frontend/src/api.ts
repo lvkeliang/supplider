@@ -8,6 +8,7 @@ import type {
   Features,
   ImportReport,
   Inspection,
+  LocalPreference,
   MergeResult,
   Page,
   RiskReport,
@@ -69,6 +70,11 @@ export interface ListParams {
   order?: 'asc' | 'desc'
   limit?: number
   cursor?: string
+  /**
+   * Local-first switch (本地供应商偏好): undefined/true uses the saved home
+   * region automatically; false sends prefer=0 to disable ranking once.
+   */
+  localFirst?: boolean
 }
 
 class ApiError extends Error {
@@ -148,6 +154,8 @@ export const api = {
         order: p.order,
         limit: p.limit,
         cursor: p.cursor,
+        // withQuery skips booleans, so send the literal 0 when opting out.
+        prefer: p.localFirst === false ? '0' : undefined,
       }),
     ),
 
@@ -236,6 +244,15 @@ export const api = {
   saveVisibilityPolicy: (maxLevel: number, bufferDays?: number) =>
     request<VisibilityPolicySaveResponse>('PUT', '/api/v1/visibility/policy',
       { max_level: maxLevel, ...(bufferDays !== undefined ? { buffer_days: bufferDays } : {}) }),
+
+  // 本地供应商偏好：设置常驻地域后，列表/搜索中本地供应商排最前（仅排序，
+  // 不筛选）。清除后恢复默认排序。
+  getLocalPreference: () =>
+    request<LocalPreference>('GET', '/api/v1/preferences/local'),
+  saveLocalPreference: (province: string, city = '') =>
+    request<LocalPreference>('PUT', '/api/v1/preferences/local', { province, city }),
+  clearLocalPreference: () =>
+    request<LocalPreference>('PUT', '/api/v1/preferences/local?clear=1'),
 
   // Upload an attachment (multipart). Returns the updated supplier document.
   // The hard limit is 50MB (enforced server-side; 413 on overflow).

@@ -10,6 +10,7 @@ package supplier
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,11 +24,23 @@ import (
 type Service struct {
 	store datamodel.SupplierStore
 	now   func() time.Time // injectable for tests
+	newID func() string    // injectable for tests; defaults to domain.NewSupplierID
 }
 
 // NewService wires the service to a store.
 func NewService(store datamodel.SupplierStore) *Service {
-	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+	return &Service{
+		store: store,
+		now:   func() time.Time { return time.Now().UTC() },
+		newID: domain.NewSupplierID,
+	}
+}
+
+// WithIDGenerator overrides supplier ID generation. Production uses
+// domain.NewSupplierID; tests inject a deterministic sequence.
+func (s *Service) WithIDGenerator(fn func() string) *Service {
+	s.newID = fn
+	return s
 }
 
 // CreateInput carries the fields a user may set at creation time.
@@ -84,17 +97,28 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Supplier,
 	recomputeRating(doc)
 	s.applyRisk(doc) // 空壳特征检测：非 AI 规则引擎，随写入刷新 risk_flags
 
-	// ID generation retries on the (astronomically unlikely) collision.
+	// ID generation retries on collision. Put is an UPSERT in every
+	// adapter (Update relies on that), so it cannot detect a duplicated
+	// create id itself — probe with Get first, otherwise a colliding id
+	// would silently overwrite another supplier document.
 	const maxAttempts = 5
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		doc.ID = domain.NewSupplierID()
+		id := s.newID()
+		switch existing, err := s.store.Get(ctx, id); {
+		case err == nil && existing != nil:
+			continue // id taken (active or archived) — regenerate
+		case err != nil && !errors.Is(err, datamodel.ErrNotFound):
+			return nil, err
+		}
+		doc.ID = id
 		err := s.store.Put(ctx, doc)
 		if err == nil {
 			return doc, nil
 		}
-		if err != datamodel.ErrConflict {
+		if !errors.Is(err, datamodel.ErrConflict) {
 			return nil, err
 		}
+		// Adapter-reported race (e.g. two processes picked the same id).
 	}
 	return nil, fmt.Errorf("supplier: could not allocate unique id after %d attempts", maxAttempts)
 }
@@ -429,6 +453,10 @@ func findInDedupIndex(targetCode, targetName string, index []dedupEntry) []Dupli
 // List returns a page of supplier SUMMARIES (list endpoints never return
 // full documents — performance red line).
 func (s *Service) List(ctx context.Context, q datamodel.Query) (datamodel.Page[domain.Summary], error) {
+	// Local-first ranking: the persisted home-region preference is filled
+	// in here (not in the adapters/HTTP) so CLI, MCP, gRPC and HTTP all get
+	// identical behavior. Ranking only — non-local suppliers still appear.
+	q = s.withLocalPreference(ctx, q)
 	page, err := s.store.List(ctx, q)
 	if err != nil {
 		return datamodel.Page[domain.Summary]{}, err

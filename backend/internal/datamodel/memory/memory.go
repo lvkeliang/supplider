@@ -109,7 +109,7 @@ func (s *Store) List(_ context.Context, q datamodel.Query) (datamodel.Page[*doma
 	}
 	s.mu.RUnlock()
 
-	sortDocs(matched, q.Sort)
+	sortDocs(matched, q.Sort, q.Filter)
 
 	// Keyset position: drop everything at or before the cursor tuple.
 	if cur.ID != "" {
@@ -132,6 +132,8 @@ func (s *Store) List(_ context.Context, q datamodel.Query) (datamodel.Page[*doma
 		page.NextCursor = datamodel.EncodeCursor(datamodel.Cursor{
 			SortKey: sortKey(last, q.Sort.Field),
 			ID:      last.ID,
+			Prio: datamodel.LocalPrio(last.BasicInfo.Region.Province, last.BasicInfo.Region.City,
+				q.Filter.PreferProvince, q.Filter.PreferCity),
 		})
 		matched = matched[:q.Limit]
 	}
@@ -265,10 +267,33 @@ func cmpTuple(a, b *domain.Supplier, f datamodel.SortField) int {
 	return 0
 }
 
-func sortDocs(docs []*domain.Supplier, s datamodel.Sort) {
-	cmp := func(i, j int) bool { return cmpTuple(docs[i], docs[j], s.Field) < 0 }
+func sortDocs(docs []*domain.Supplier, s datamodel.Sort, f datamodel.SupplierFilter) {
+	// Local-first priority leads when a region preference is set.
+	prio := func(d *domain.Supplier) int {
+		return datamodel.LocalPrio(d.BasicInfo.Region.Province, d.BasicInfo.Region.City,
+			f.PreferProvince, f.PreferCity)
+	}
+	less := func(i, j int) bool {
+		if f.PreferProvince != "" {
+			pi, pj := prio(docs[i]), prio(docs[j])
+			if pi != pj {
+				return pi > pj // local (1) first
+			}
+		}
+		return cmpTuple(docs[i], docs[j], s.Field) < 0
+	}
+	greater := func(i, j int) bool {
+		if f.PreferProvince != "" {
+			pi, pj := prio(docs[i]), prio(docs[j])
+			if pi != pj {
+				return pi > pj // local tier still first under ascending secondary
+			}
+		}
+		return cmpTuple(docs[i], docs[j], s.Field) > 0
+	}
+	cmp := less
 	if s.Order == datamodel.OrderAsc {
-		cmp = func(i, j int) bool { return cmpTuple(docs[i], docs[j], s.Field) > 0 }
+		cmp = greater
 	}
 	sort.Slice(docs, cmp)
 }

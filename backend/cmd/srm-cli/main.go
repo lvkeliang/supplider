@@ -92,6 +92,8 @@ func main() {
 		err = cmdAppeal(args, true)
 	case "resolve-appeal":
 		err = cmdAppeal(args, false)
+	case "preference", "pref", "local":
+		err = cmdPreference(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -144,10 +146,15 @@ Usage:
                                  录入者对"待调整"标记申诉（暂停自动降级倒计时）
   srm-cli resolve-appeal <id> --grant|--deny [--max-level N]
                                  管理员裁决申诉：--grant 成立(例外保留等级) / --deny 驳回(立即降级)
+  srm-cli preference [--province 省 [--city 市]] [--clear] [--json]
+                                 本地供应商偏好：不带参数=查看，--province/--city 设置（列表与
+                                 搜索中本地供应商排最前，仅排序不筛选），--clear 清除
 
 Filters (shared by list/search/export):
   --province 省  --city 市  --district 区县  --category 品类(逗号分隔, OR)
   --min-qual 二级  --min-rating 4.0  --owner 用户  --q 关键词
+  --prefer-province 省 [--prefer-city 市]  本次查询本地优先（覆盖已保存偏好）
+  --no-local                               本次查询关闭已保存的本地优先排序
 
 Environment:
   SRM_API_ADDR  API base URL (default http://127.0.0.1:7612)
@@ -158,14 +165,17 @@ Environment:
 // and export. Bind them onto a FlagSet with bindFilterFlags, then render
 // them as query parameters with apply.
 type filterFlags struct {
-	province  string
-	city      string
-	district  string
-	category  string
-	minQual   string
-	owner     string
-	keyword   string
-	minRating float64
+	province       string
+	city           string
+	district       string
+	category       string
+	minQual        string
+	owner          string
+	keyword        string
+	minRating      float64
+	preferProvince string
+	preferCity     string
+	noLocal        bool
 }
 
 func bindFilterFlags(fs *flag.FlagSet) *filterFlags {
@@ -178,6 +188,11 @@ func bindFilterFlags(fs *flag.FlagSet) *filterFlags {
 	fs.StringVar(&f.owner, "owner", "", "owner id filter")
 	fs.StringVar(&f.keyword, "q", "", "keyword")
 	fs.Float64Var(&f.minRating, "min-rating", 0, "minimum rating")
+	// Local-first ranking (本地供应商偏好): explicit hints override the
+	// saved home region; --no-local disables the saved preference once.
+	fs.StringVar(&f.preferProvince, "prefer-province", "", "rank this province's suppliers first (overrides saved preference)")
+	fs.StringVar(&f.preferCity, "prefer-city", "", "rank this city's suppliers first (with --prefer-province)")
+	fs.BoolVar(&f.noLocal, "no-local", false, "disable the saved home-region ranking for this query")
 	return f
 }
 
@@ -195,9 +210,45 @@ func (f *filterFlags) apply(q url.Values) {
 	set("min_qual_level", f.minQual)
 	set("owner", f.owner)
 	set("q", f.keyword)
+	set("prefer_province", f.preferProvince)
+	set("prefer_city", f.preferCity)
+	if f.noLocal {
+		q.Set("prefer", "0")
+	}
 	if f.minRating > 0 {
 		q.Set("min_rating", fmt.Sprintf("%g", f.minRating))
 	}
+}
+
+// localPreference mirrors the HTTP /preferences/local payload.
+type localPreference struct {
+	Province   string `json:"province"`
+	City       string `json:"city"`
+	Configured bool   `json:"configured"`
+}
+
+// fetchLocalPreference reads the saved home region; failures collapse to
+// the empty preference (listing must work even if the endpoint errors).
+func fetchLocalPreference() localPreference {
+	var p localPreference
+	resp, err := http.Get(apiBase() + "/api/v1/preferences/local")
+	if err != nil {
+		return p
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return p
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&p)
+	return p
+}
+
+// isLocal reports whether a summary row lies in the preferred region.
+func isLocal(prov, city string, p localPreference) bool {
+	if !p.Configured || p.Province == "" || prov != p.Province {
+		return false
+	}
+	return p.City == "" || city == p.City
 }
 
 func apiBase() string {
@@ -332,9 +383,26 @@ func cmdList(args []string) error {
 		fmt.Println("(no suppliers match)")
 		return nil
 	}
+	// Effective preference for the 📍 marker: explicit flag > saved
+	// preference; --no-local shows no marker. Best-effort fetch.
+	pref := localPreference{}
+	switch {
+	case filters.preferProvince != "":
+		pref = localPreference{Configured: true, Province: filters.preferProvince, City: filters.preferCity}
+	case !filters.noLocal:
+		pref = fetchLocalPreference()
+	}
+	if pref.Configured {
+		region := strings.TrimSpace(pref.Province + " " + pref.City)
+		fmt.Fprintf(os.Stderr, "本地优先：%s（📍 = 本地供应商，仅排序不筛选）\n", region)
+	}
 	for _, s := range page.Items {
 		loc := strings.TrimSpace(s.Province + " " + s.City + " " + s.District)
-		fmt.Printf("%s  %-4.1f★  %-12s  %s  %s\n", s.ID, s.Rating, s.TopQual, loc, s.Name)
+		marker := "  "
+		if isLocal(s.Province, s.City, pref) {
+			marker = "📍"
+		}
+		fmt.Printf("%s %s  %-4.1f★  %-12s  %s  %s\n", marker, s.ID, s.Rating, s.TopQual, loc, s.Name)
 	}
 	if page.NextCursor != "" {
 		fmt.Printf("\n-- more: srm-cli list --cursor %s\n", page.NextCursor)
@@ -1440,6 +1508,87 @@ func cmdVisibilityPolicy(args []string) error {
 type supplierPolicy struct {
 	MaxLevel   int `json:"max_level"`
 	BufferDays int `json:"buffer_days"`
+}
+
+// cmdPreference reads, saves or clears the home-region preference
+// (本地供应商偏好). No flags = show; --province (optionally --city) saves
+// and makes local suppliers rank first in every list/search; --clear
+// removes the preference.
+func cmdPreference(args []string) error {
+	fs := flag.NewFlagSet("preference", flag.ContinueOnError)
+	province := fs.String("province", "", "home province (required when setting)")
+	city := fs.String("city", "", "home city (optional)")
+	clear := fs.Bool("clear", false, "remove the saved preference (local-first off)")
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	provinceSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "province" {
+			provinceSet = true
+		}
+	})
+	if provinceSet && strings.TrimSpace(*province) == "" {
+		return fmt.Errorf("--province must not be empty (use --clear to remove the preference)")
+	}
+
+	method, target := http.MethodGet, apiBase()+"/api/v1/preferences/local"
+	var body io.Reader
+	written := false
+	switch {
+	case *clear:
+		target += "?clear=1"
+		method, written = http.MethodPut, true
+	case strings.TrimSpace(*province) != "":
+		rb, _ := json.Marshal(map[string]string{
+			"province": strings.TrimSpace(*province),
+			"city":     strings.TrimSpace(*city),
+		})
+		body = bytes.NewReader(rb)
+		method, written = http.MethodPut, true
+	}
+	req, err := http.NewRequest(method, target, body)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var p localPreference
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		return err
+	}
+	if *asJSON {
+		return json.NewEncoder(os.Stdout).Encode(p)
+	}
+	if !p.Configured {
+		fmt.Println("未配置本地供应商偏好（列表/搜索不做本地优先排序）。")
+		if !written {
+			fmt.Fprintln(os.Stderr, "设置：srm-cli preference --province 浙江 --city 杭州；清除：srm-cli preference --clear")
+		} else {
+			fmt.Println("已清除本地供应商偏好。")
+		}
+		return nil
+	}
+	region := strings.TrimSpace(p.Province + " " + p.City)
+	verb := "当前偏好"
+	if written {
+		verb = "已保存偏好"
+	}
+	fmt.Printf("%s：%s。列表与搜索中本地供应商排最前（仅排序，不筛选外地供应商）。\n", verb, region)
+	return nil
 }
 
 // printVisibilityRows renders the violation/enforce item list as a CJK-aligned table.

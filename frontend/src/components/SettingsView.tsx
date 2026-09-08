@@ -3,7 +3,7 @@ import { api, apiUrl } from '../api'
 import { DocumentCard } from './Card'
 import type { Go } from '../App'
 import { VIS_LABELS } from '../types'
-import type { VisibilityPolicyResponse, VisibilityPolicySaveResponse } from '../types'
+import type { LocalPreference, VisibilityPolicyResponse, VisibilityPolicySaveResponse } from '../types'
 
 // SettingsView is the admin console seed surface. For the personal MVP it
 // holds one policy: the visibility cap (可见性策略收紧). Tightening it runs
@@ -123,6 +123,8 @@ export function SettingsView({ go }: { go: Go }) {
         )}
       </DocumentCard>
 
+      <LocalPreferenceCard />
+
       <DocumentCard title="数据备份与迁移" defaultOpen>
         <p className="mb-3 text-sm text-slate-500">
           一次下载完整库备份（<b>.zip</b>）：数据库一致性快照 + 全部附件文件，应用运行中也可安全导出。
@@ -135,5 +137,123 @@ export function SettingsView({ go }: { go: Go }) {
         </a>
       </DocumentCard>
     </div>
+  )
+}
+
+/**
+ * LocalPreferenceCard configures the home region (本地供应商偏好): once set,
+ * suppliers in the region rank first in every list/search. Ranking only —
+ * out-of-region suppliers still appear afterward. Stored server-side with
+ * the database (travels with backups), honored by HTTP/CLI/MCP alike.
+ */
+function LocalPreferenceCard() {
+  const [pref, setPref] = useState<LocalPreference | null>(null)
+  const [province, setProvince] = useState('')
+  const [city, setCity] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [note, setNote] = useState('')
+
+  useEffect(() => {
+    api
+      .getLocalPreference()
+      .then((p) => {
+        setPref(p)
+        setProvince(p.province ?? '')
+        setCity(p.city ?? '')
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [])
+
+  const save = async () => {
+    if (!province.trim()) {
+      setError('请填写省份（如 浙江）；只需省级偏好时城市可留空')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setNote('')
+    try {
+      const p = await api.saveLocalPreference(province.trim(), city.trim())
+      setPref(p)
+      setNote('已保存：列表与搜索中本地供应商将排在最前（仅排序，不影响筛选）。')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clear = async () => {
+    setBusy(true)
+    setError('')
+    setNote('')
+    try {
+      const p = await api.clearLocalPreference()
+      setPref(p)
+      setProvince('')
+      setCity('')
+      setNote('已清除本地偏好，列表恢复默认排序。')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <DocumentCard title="本地供应商偏好（本地优先）" defaultOpen>
+      <p className="mb-3 text-sm text-slate-500">
+        设置常驻地域后，<b>列表与搜索结果中本地供应商自动排到最前</b>，外地供应商仍然显示在后面
+        （只调整排序，不会筛选掉任何供应商）。CLI（<code className="rounded bg-slate-100 px-1">srm-cli list/search</code>）
+        与 MCP 搜索同样生效；随数据库一起备份。
+      </p>
+      <div className="flex flex-wrap items-end gap-4">
+        <label className="flex flex-col gap-1 text-sm text-slate-700">
+          省份（必填）
+          <input
+            className="w-36 rounded-md border border-slate-300 px-2 py-1.5"
+            placeholder="如 浙江"
+            value={province}
+            disabled={busy}
+            onChange={(e) => setProvince(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-slate-700">
+          城市（可选）
+          <input
+            className="w-36 rounded-md border border-slate-300 px-2 py-1.5"
+            placeholder="如 杭州"
+            value={city}
+            disabled={busy}
+            onKeyDown={(e) => e.key === 'Enter' && save()}
+            onChange={(e) => setCity(e.target.value)}
+          />
+        </label>
+        <button className="btn-primary" disabled={busy || !pref} onClick={save}>
+          {busy ? '保存中…' : '保存偏好'}
+        </button>
+        {pref?.configured && (
+          <button className="btn-ghost" disabled={busy} onClick={clear}>
+            清除偏好
+          </button>
+        )}
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-xs ${
+            pref?.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+          }`}
+        >
+          {pref?.configured ? `已配置：${pref.province}${pref.city ? ` · ${pref.city}` : ''}` : '未配置'}
+        </span>
+      </div>
+      {error && (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+      )}
+      {note && !error && (
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {note}
+        </div>
+      )}
+    </DocumentCard>
   )
 }

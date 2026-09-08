@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type ListParams } from '../api'
-import type { ExpiringReport, ShellRiskReport, SupplierSummary } from '../types'
+import type { ExpiringReport, LocalPreference, ShellRiskReport, SupplierSummary } from '../types'
 import { QUAL_LEVELS, STATUS_ARCHIVED, STATUS_BLACKLISTED } from '../types'
 import type { Go } from '../App'
 
@@ -48,6 +48,14 @@ export function SupplierList({ go }: { go: Go }) {
   const [showShell, setShowShell] = useState(false)
   // 比价/对比：勾选的供应商 id（跨分页保留，打开对比页时一并提交）。
   const [selected, setSelected] = useState<string[]>([])
+  // 本地供应商偏好（设置页配置）：开启时本地供应商排最前（仅排序）。
+  const [pref, setPref] = useState<LocalPreference | null>(null)
+  const [localOn, setLocalOn] = useState(true)
+
+  const isLocal = (s: SupplierSummary) =>
+    !!pref?.configured &&
+    s.province === pref.province &&
+    (!pref.city || s.city === pref.city)
 
   const toggleSelected = (id: string, on: boolean) =>
     setSelected((prev) => (on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)))
@@ -65,6 +73,12 @@ export function SupplierList({ go }: { go: Go }) {
       .shellRiskQueue()
       .then((rep) => {
         if (rep.count > 0) setShellQueue(rep)
+      })
+      .catch(() => {})
+    api
+      .getLocalPreference()
+      .then((p) => {
+        if (p.configured) setPref(p)
       })
       .catch(() => {})
   }, [])
@@ -98,6 +112,7 @@ export function SupplierList({ go }: { go: Go }) {
     params.min_qual_level,
     params.min_rating,
     params.include_archived,
+    params.localFirst,
   ])
 
   const set = (patch: Partial<ListParams>) => setParams((p) => ({ ...p, ...patch }))
@@ -184,6 +199,20 @@ export function SupplierList({ go }: { go: Go }) {
             />
             显示已归档
           </label>
+          {pref?.configured && (
+            <label className="flex items-center gap-1" title={`本地供应商（${[pref.province, pref.city].filter(Boolean).join(' · ')}）排最前，仅排序不筛选`}>
+              <input
+                type="checkbox"
+                checked={localOn}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setLocalOn(on)
+                  set({ localFirst: on ? undefined : false })
+                }}
+              />
+              本地优先（{[pref.province, pref.city].filter(Boolean).join('·')}）
+            </label>
+          )}
         </div>
       </div>
 
@@ -303,6 +332,14 @@ export function SupplierList({ go }: { go: Go }) {
                 onChange={(e) => toggleSelected(s.id, e.target.checked)}
               />
               <span className="font-medium text-slate-800">{s.name}</span>
+              {localOn && isLocal(s) && (
+                <span
+                  className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700"
+                  title="本地供应商（符合本地偏好地域），已优先排序"
+                >
+                  📍 本地
+                </span>
+              )}
               {s.status === STATUS_BLACKLISTED && (
                 <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white" title="黑名单（淘汰/禁用），请勿选用">
                   🚫 黑名单

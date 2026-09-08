@@ -351,8 +351,10 @@ func (s *Store) List(ctx context.Context, q datamodel.Query) (datamodel.Page[*do
 	}
 
 	where, args := buildWhere(q.Filter)
+	// Local-preference priority expression (local first), or "" when off.
+	prioExpr, prioArgs := localPrioExpr(q.Filter)
 	if cur.ID != "" {
-		pred, cursorArgs, err := keysetPredicate(q.Sort, cur)
+		pred, cursorArgs, err := keysetPredicate(q.Sort, cur, prioExpr, prioArgs)
 		if err != nil {
 			return datamodel.Page[*domain.Supplier]{}, err
 		}
@@ -371,7 +373,14 @@ func (s *Store) List(ctx context.Context, q datamodel.Query) (datamodel.Page[*do
 		sqlStr += "\n WHERE " + strings.Join(where, "\n   AND ")
 	}
 	// Fetch one extra row to detect a next page (no OFFSET, no COUNT).
-	sqlStr += fmt.Sprintf("\n ORDER BY s.%s %s, s.id %s\n LIMIT ?", col, dir, dir)
+	order := fmt.Sprintf("\n ORDER BY s.%s %s, s.id %s\n LIMIT ?", col, dir, dir)
+	if prioExpr != "" {
+		// Local suppliers (prio DESC) lead every page, then the normal order.
+		order = fmt.Sprintf("\n ORDER BY (%s) DESC, s.%s %s, s.id %s\n LIMIT ?",
+			prioExpr, col, dir, dir)
+		args = append(args, prioArgs...)
+	}
+	sqlStr += order
 	args = append(args, q.Limit+1)
 
 	rows, err := s.db.QueryContext(ctx, sqlStr, args...)
@@ -403,6 +412,8 @@ func (s *Store) List(ctx context.Context, q datamodel.Query) (datamodel.Page[*do
 		page.NextCursor = datamodel.EncodeCursor(datamodel.Cursor{
 			SortKey: sortKeyValue(last, q.Sort.Field),
 			ID:      last.ID,
+			Prio: datamodel.LocalPrio(last.BasicInfo.Region.Province, last.BasicInfo.Region.City,
+				q.Filter.PreferProvince, q.Filter.PreferCity),
 		})
 	}
 	return page, nil
@@ -474,7 +485,23 @@ func buildWhere(f datamodel.SupplierFilter) ([]string, []any) {
 //
 //	desc: (col < key) OR (col = key AND id < curID)
 //	asc:  (col > key) OR (col = key AND id > curID)
-func keysetPredicate(sort datamodel.Sort, cur datamodel.Cursor) (string, []any, error) {
+//
+// localPrioExpr returns the SQL for the local-first priority CASE and its
+// args, repeated for each occurrence. Returns "" when no preference is set.
+// Must match datamodel.LocalPrio exactly.
+func localPrioExpr(f datamodel.SupplierFilter) (string, []any) {
+	if f.PreferProvince == "" {
+		return "", nil
+	}
+	expr := "(CASE WHEN s.province = ? AND (? = '' OR s.city = ?) THEN 1 ELSE 0 END)"
+	args := []any{f.PreferProvince, f.PreferCity, f.PreferCity}
+	return expr, args
+}
+
+// keysetPredicate builds the WHERE clause selecting rows strictly after the
+// cursor tuple. With a local-preference hint the leading key is the local
+// priority (always DESC); otherwise it is the two-key (sort column, id).
+func keysetPredicate(sort datamodel.Sort, cur datamodel.Cursor, prioExpr string, prioArgs []any) (string, []any, error) {
 	col := sortColumn(sort.Field)
 	key, err := cursorKeyParam(sort.Field, cur.SortKey)
 	if err != nil {
@@ -484,8 +511,24 @@ func keysetPredicate(sort datamodel.Sort, cur datamodel.Cursor) (string, []any, 
 	if sort.Order == datamodel.OrderAsc {
 		cmp = ">"
 	}
-	pred := fmt.Sprintf("(s.%[1]s %[2]s ? OR (s.%[1]s = ? AND s.id %[2]s ?))", col, cmp)
-	return pred, []any{key, key, cur.ID}, nil
+	tail := fmt.Sprintf("(s.%[1]s %[2]s ? OR (s.%[1]s = ? AND s.id %[2]s ?))", col, cmp)
+	tailArgs := []any{key, key, cur.ID}
+
+	if prioExpr == "" {
+		return tail, tailArgs, nil
+	}
+	// (prio < cp) OR (prio = cp AND <existing 2-key tail>)
+	// Priority is always DESC so later rows have an equal-or-lower priority.
+	// Bind order follows textual placeholder occurrence: the CASE repeats
+	// (3 args each), so args = prioArgs, cp, prioArgs, cp, then tail.
+	args := make([]any, 0, len(prioArgs)*2+2+len(tailArgs))
+	args = append(args, prioArgs...)
+	args = append(args, cur.Prio)
+	args = append(args, prioArgs...)
+	args = append(args, cur.Prio)
+	args = append(args, tailArgs...)
+	pred := fmt.Sprintf("((%s) < ? OR ((%s) = ? AND %s))", prioExpr, prioExpr, tail)
+	return pred, args, nil
 }
 
 func sortColumn(f datamodel.SortField) string {

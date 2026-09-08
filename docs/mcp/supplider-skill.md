@@ -49,6 +49,10 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 
 供应商 id 形如 `sup_2026_XXXXXX`，由 `search_suppliers` / `add_supplier` 返回。
 
+> **本地优先排序**：用户在设置页或 `srm-cli preference` 配置常驻地域（如 浙江·杭州）后，
+> `search_suppliers` 与列表结果中本地供应商自动排最前——**仅排序，外地供应商不会被筛掉**。
+> 向用户推荐时可优先解读排在前面的本地供应商；该偏好为用户本地配置，MCP 不提供修改入口。
+
 ## 资源（Resources）
 
 - `supplider://suppliers` — 供应商摘要首页（含空壳风险/审核标记）。

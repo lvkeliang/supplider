@@ -246,6 +246,16 @@ export interface VisibilityPolicySaveResponse {
   report: VisibilityEnforceReport
 }
 
+// ---- Local-supplier preference (本地供应商偏好) ----
+
+/** Home region used for local-first ranking of lists/search. */
+export interface LocalPreference {
+  province: string
+  city?: string
+  /** false = nothing saved, local-first ranking off. */
+  configured: boolean
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */
