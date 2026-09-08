@@ -31,6 +31,32 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-08：附件删除——附件管理从"只进不出"补齐
+
+附件此前只能上传（合同/资质扫描件/营业执照），没有删除入口：传错文件或替换
+扫描件后旧文件永久残留、占用空间且无法清理。本环补齐删除（文档式档案管理
+必备）。**MCP 不暴露删除**（与归档/合并/黑名单同边界——破坏性动作由人在 UI 执行）。
+
+- **服务层**（`Service.RemoveAttachment(ctx, id, url)`）：按 URL 定位附件记录，
+  从 `doc.Attachments` 移除并写 `attachments` change_log（Old=文件名）；空 URL
+  报错、记录不存在报"attachment not found"、归档供应商拒绝编辑。**只改文档**——
+  对象字节由接线层（HTTP）删除，与上传路径（HTTP 负责 Put/Remove 字节、服务
+  负责文档）对称。返回被删记录。
+- **HTTP**：`DELETE /api/v1/suppliers/{id}/attachments?url=<附件URL或key>`——
+  先 `RemoveAttachment` 删记录（记录不存在直接 404，绝不动别的文件），成功后
+  `Objects.Remove(key)` 删字节（best-effort，对象已不存在不报错）。key 必须以
+  `<id>/` 前缀开头才删字节，防止越权删其他供应商文件。
+- **错误码修正**：`writeServiceError` 加"not found"子串 → 404（此前领域层
+  "记录未找到"会落到 500）；缺 url 参数 400。
+- **前端**：详情页附件列表每项加"删除"按钮（归档供应商不显示），confirm 提示
+  "文件将从档案与磁盘移除，不可恢复"，删除后刷新；`api.deleteAttachment`。
+- 测试：`supplier/attachment_test.go` 2 例——双附件删其一（剩正确记录 + 返回
+  被删件 + change_log Old 条目）、重复删/空 URL 报错、归档供应商拒绝。全量
+  `go test` 默认+personal 全绿，enterprise/personal 编译通过；前端 tsc+vite 通过。
+- E2E（personal/SQLite + 真实对象存储）：上传 license.txt → 磁盘有文件 →
+  DELETE ?url= → HTTP 200、文档附件数 0、下载 404、**磁盘文件已删除**；重复删
+  404、缺参 400、他人 key（sup_OTHER/…）记录不存在 404 且字节不触碰。
+
 ### 2026-09-08：前端供应商对比/比价——"使用"阶段选型对比进入 UI
 
 PRD 使用环节含"项目比价/合作记录"，`srm-cli compare` 与 MCP `compare_suppliers`

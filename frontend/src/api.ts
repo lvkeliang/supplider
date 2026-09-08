@@ -222,6 +222,12 @@ export const api = {
     return data as Supplier
   },
 
+  // Remove an attachment: deletes the document record and the backing file.
+  // url is the stored attachment URL (apiUrl-relative path).
+  deleteAttachment: (id: string, url: string) =>
+    request<Supplier>('DELETE',
+      withQuery(`/api/v1/suppliers/${encodeURIComponent(id)}/attachments`, { url })),
+
   // ---- Excel import ----
 
   // Preview an uploaded workbook: headers + sample rows + suggested mapping.

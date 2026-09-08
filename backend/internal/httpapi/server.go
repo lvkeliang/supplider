@@ -22,6 +22,7 @@
 //	POST   /api/v1/suppliers/{id}/risk-review   human resolves flag (verified|dismissed)
 //	GET    /api/v1/risk/shell                   shell-risk review queue (active, unreviewed)
 //	POST   /api/v1/suppliers/{id}/attachments   upload (multipart, ≤50MB)
+//	DELETE /api/v1/suppliers/{id}/attachments?url=  remove an attachment
 //	GET    /api/v1/attachments/{key...}         download/stream
 //	GET    /api/v1/import/template              download .xlsx template
 //	POST   /api/v1/import/preview               parse + suggest column mapping
@@ -122,6 +123,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-review", s.handleRiskReview)
 	s.Mux.HandleFunc("GET /api/v1/risk/shell", s.handleShellRiskQueue)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/attachments", s.handleUploadAttachment)
+	s.Mux.HandleFunc("DELETE /api/v1/suppliers/{id}/attachments", s.handleDeleteAttachment)
 	s.Mux.HandleFunc("GET /api/v1/attachments/{key...}", s.handleDownloadAttachment)
 	s.Mux.HandleFunc("GET /api/v1/import/template", s.handleImportTemplate)
 	s.Mux.HandleFunc("POST /api/v1/import/preview", s.handleImportPreview)
@@ -407,6 +409,57 @@ func (s *Server) handleUploadAttachment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusCreated, doc)
+}
+
+// attachmentKeyFromURL extracts the object key from a stored attachment URL
+// ("/api/v1/attachments/<key>"), tolerating a bare key or a leading slash.
+func attachmentKeyFromURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	const prefix = "/api/v1/attachments/"
+	if strings.HasPrefix(raw, prefix) {
+		raw = raw[len(prefix):]
+	}
+	return strings.TrimPrefix(raw, "/")
+}
+
+// handleDeleteAttachment removes one attachment from the document and then
+// deletes the backing object bytes. The attachment is identified by its URL
+// (or bare key) via ?url=...; removing the document record happens first so
+// a missing object (already cleaned up, or never stored) does not strand a
+// dangling record. Object deletion is best-effort after the record is gone.
+func (s *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	if s.Objects == nil {
+		writeError(w, http.StatusNotImplemented, "attachments are not configured")
+		return
+	}
+	id := r.PathValue("id")
+	raw := r.URL.Query().Get("url")
+	if raw == "" {
+		raw = r.URL.Query().Get("key")
+	}
+	if strings.TrimSpace(raw) == "" {
+		writeError(w, http.StatusBadRequest, "url (attachment URL or key) is required")
+		return
+	}
+	// Normalize to the stored record URL so RemoveAttachment matches.
+	key := attachmentKeyFromURL(raw)
+	url := "/api/v1/attachments/" + key
+
+	doc, removed, err := s.Service.RemoveAttachment(r.Context(), id, url)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	// Document record is gone; now drop the bytes (best-effort — a missing
+	// object is not an error). The key must belong to this supplier.
+	if strings.HasPrefix(key, id+"/") {
+		if rmErr := s.Objects.Remove(r.Context(), key); rmErr != nil &&
+			!errors.Is(rmErr, objectstore.ErrObjectNotFound) {
+			log.Printf("httpapi: remove object %s: %v", key, rmErr)
+		}
+	}
+	_ = removed
+	writeJSON(w, http.StatusOK, doc)
 }
 
 // handleDownloadAttachment streams a stored object. The key's first path
@@ -1208,6 +1261,11 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, datamodel.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	default:
+		// Domain "not found" errors (e.g. attachment/record missing) are 404.
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
 		// Validation errors are 400; everything unexpected is 500.
 		if strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "must be") {
 			writeError(w, http.StatusBadRequest, err.Error())

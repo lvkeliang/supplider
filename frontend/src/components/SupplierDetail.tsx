@@ -228,6 +228,20 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     }
   }
 
+  const deleteAttachment = async (url: string, name: string) => {
+    if (!confirm(`确定删除附件「${name}」？文件将从档案与磁盘移除，不可恢复。`)) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.deleteAttachment(id, url)
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (error) return <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
   if (!doc) return <div className="py-10 text-center text-slate-400">加载中…</div>
 
@@ -605,6 +619,16 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                   {a.name}
                 </a>
                 <span className="text-xs text-slate-400">{(a.size / 1024).toFixed(0)} KB</span>
+                {!archived && (
+                  <button
+                    className="ml-auto text-xs text-red-500 hover:text-red-700"
+                    disabled={busy}
+                    title="删除附件（档案记录与文件一并移除）"
+                    onClick={() => deleteAttachment(a.url, a.name)}
+                  >
+                    删除
+                  </button>
+                )}
               </li>
             ))}
           </ul>

@@ -225,6 +225,46 @@ func (s *Service) AddAttachment(ctx context.Context, id string, att domain.Attac
 	return doc, nil
 }
 
+// RemoveAttachment detaches one attachment identified by its URL from the
+// document. It returns the removed record (so the wiring layer can delete
+// the backing object bytes) and an error if no attachment carries that URL.
+// Archived suppliers are not editable. The object bytes themselves are not
+// touched here — the store port does not know about the object store.
+func (s *Service) RemoveAttachment(ctx context.Context, id, url string) (*domain.Supplier, *domain.Attachment, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return nil, nil, fmt.Errorf("supplier: attachment url is required")
+	}
+	doc, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if doc.Status == domain.StatusArchived {
+		return nil, nil, fmt.Errorf("supplier: %s is archived; restore before editing", id)
+	}
+	idx := -1
+	for i := range doc.Attachments {
+		if doc.Attachments[i].URL == url {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil, nil, fmt.Errorf("supplier: attachment not found: %s", url)
+	}
+	removed := doc.Attachments[idx]
+	doc.Attachments = append(doc.Attachments[:idx], doc.Attachments[idx+1:]...)
+	now := s.now()
+	doc.ChangeLog = append(doc.ChangeLog, domain.ChangeEntry{
+		Field: "attachments", Old: removed.Name, Date: now, Source: domain.SourceManual,
+	})
+	doc.UpdatedAt = now
+	if err := s.store.Put(ctx, doc); err != nil {
+		return nil, nil, err
+	}
+	return doc, &removed, nil
+}
+
 // Archive performs the delete = archive lifecycle action.
 func (s *Service) Archive(ctx context.Context, id string) error {
 	doc, err := s.store.Get(ctx, id)
