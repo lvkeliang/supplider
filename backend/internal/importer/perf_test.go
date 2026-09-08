@@ -65,7 +65,7 @@ func TestImport1000RowsUnder3s(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	rep := svc.Import(ctx, items)
+	rep := svc.Import(ctx, items, supplier.ImportOptions{})
 	elapsed := time.Since(start)
 
 	if rep.Created != n {

@@ -222,12 +222,14 @@ export const api = {
     mapping: Record<string, string>,
     owner: string,
     visibility: number,
+    skipDuplicates = false,
   ): Promise<ImportReport> => {
     const form = new FormData()
     form.append('file', file)
     form.append('mapping', JSON.stringify(mapping))
     form.append('owner', owner)
     form.append('visibility', String(visibility))
+    form.append('skip_duplicates', skipDuplicates ? 'true' : 'false')
     const res = await fetch(BASE + '/api/v1/import/commit', { method: 'POST', body: form })
     const data = await res.json().catch(() => undefined)
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)

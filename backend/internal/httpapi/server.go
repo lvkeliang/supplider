@@ -472,7 +472,14 @@ func (s *Server) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 		writeImportError(w, err)
 		return
 	}
-	report := s.Service.Import(r.Context(), items)
+	// 录入去重：默认仅报告重复行（仍导入）；skip_duplicates=true 时命中
+	// 既有供应商（含黑名单/归档）的行直接跳过、不创建。
+	var opts supplier.ImportOptions
+	switch strings.ToLower(strings.TrimSpace(r.FormValue("skip_duplicates"))) {
+	case "true", "1", "yes", "on":
+		opts.SkipDuplicates = true
+	}
+	report := s.Service.Import(r.Context(), items, opts)
 	writeJSON(w, http.StatusOK, report)
 }
 

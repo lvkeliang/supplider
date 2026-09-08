@@ -277,10 +277,33 @@ type ImportError struct {
 
 // ImportReport summarizes a batch import.
 type ImportReport struct {
-	Created int           `json:"created"`
-	Failed  int           `json:"failed"`
+	Created int `json:"created"`
+	Failed  int `json:"failed"`
+	// Skipped counts rows not imported because they matched an existing
+	// supplier (only when ImportOptions.SkipDuplicates is set).
+	Skipped int           `json:"skipped,omitempty"`
 	IDs     []string      `json:"ids,omitempty"`
 	Errors  []ImportError `json:"errors,omitempty"`
+	// Duplicates reports every row that looked like a duplicate — whether it
+	// was skipped or (in warn mode) still imported. Non-blocking by default.
+	Duplicates []ImportDuplicate `json:"duplicates,omitempty"`
+}
+
+// ImportDuplicate reports one imported row that matched an existing supplier
+// (or an earlier row in the same batch).
+type ImportDuplicate struct {
+	Row     int              `json:"row"`
+	Name    string           `json:"name"` // candidate company name from the row
+	Matches []DuplicateMatch `json:"matches"`
+}
+
+// ImportOptions tunes a batch import.
+type ImportOptions struct {
+	// SkipDuplicates: when true, a row that matches an existing supplier is
+	// NOT imported (counted in Skipped). When false (default) the row is
+	// imported anyway but reported in Duplicates as a warning — same
+	// "flag, don't block" philosophy as manual entry.
+	SkipDuplicates bool
 }
 
 // Import creates suppliers in bulk (Excel import). Each row goes through the
@@ -288,11 +311,42 @@ type ImportReport struct {
 // document is indistinguishable from a manually entered one. Source is forced
 // to import for provenance. One bad row never aborts the batch: its error is
 // recorded and import continues (校验报错行报告).
-func (s *Service) Import(ctx context.Context, items []ImportItem) ImportReport {
-	rep := ImportReport{Errors: []ImportError{}}
+//
+// Before creating, each row is checked for duplicates (录入去重) against the
+// existing library — including blacklisted/archived records — AND against rows
+// already accepted earlier in the SAME file, so two identical spreadsheet rows
+// are caught too. The library is indexed ONCE up front (pre-normalized keys)
+// rather than re-scanned per row, keeping a 1000-row import fast.
+func (s *Service) Import(ctx context.Context, items []ImportItem, opts ImportOptions) ImportReport {
+	rep := ImportReport{Errors: []ImportError{}, Duplicates: []ImportDuplicate{}}
+
+	// One-pass index of the whole library; accepted batch rows are appended
+	// as we go so intra-batch duplicates are caught too. A load failure is
+	// non-fatal: Create still surfaces store errors per row.
+	index, err := s.loadDedupIndex(ctx)
+	if err != nil {
+		index = nil
+	}
+
 	for _, it := range items {
 		in := it.Input
 		in.Source = domain.SourceImport
+
+		// Duplicate check (pre-normalized index; matches carry status).
+		targetCode := normalizeCreditCode(in.BasicInfo.CreditCode)
+		targetName := normalizeCompanyName(in.BasicInfo.CompanyName)
+		if matches := findInDedupIndex(targetCode, targetName, index); len(matches) > 0 {
+			rep.Duplicates = append(rep.Duplicates, ImportDuplicate{
+				Row:     it.Row,
+				Name:    in.BasicInfo.CompanyName,
+				Matches: matches,
+			})
+			if opts.SkipDuplicates {
+				rep.Skipped++
+				continue
+			}
+		}
+
 		doc, err := s.Create(ctx, in)
 		if err != nil {
 			rep.Failed++
@@ -301,8 +355,29 @@ func (s *Service) Import(ctx context.Context, items []ImportItem) ImportReport {
 		}
 		rep.Created++
 		rep.IDs = append(rep.IDs, doc.ID)
+		index = append(index, indexDoc(doc)) // later rows in this file now match it
 	}
 	return rep
+}
+
+// findInDedupIndex matches one candidate against a pre-built index, returning
+// matches ordered strong→probable / blacklisted-first (same ordering as
+// CheckDuplicates). Returns nil when the candidate has no usable identity.
+func findInDedupIndex(targetCode, targetName string, index []dedupEntry) []DuplicateMatch {
+	if targetCode == "" && targetName == "" {
+		return nil
+	}
+	matches := make([]DuplicateMatch, 0)
+	for _, e := range index {
+		if m, ok := matchEntry(targetCode, targetName, e); ok {
+			matches = append(matches, m)
+		}
+	}
+	rankAndSortMatches(matches)
+	if len(matches) > MaxExportDocs {
+		matches = matches[:MaxExportDocs]
+	}
+	return matches
 }
 
 // List returns a page of supplier SUMMARIES (list endpoints never return

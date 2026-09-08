@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { api, apiUrl } from '../api'
 import type { ImportReport, Inspection } from '../types'
-import { VIS_LABELS } from '../types'
+import { VIS_LABELS, STATUS_BLACKLISTED, STATUS_ARCHIVED } from '../types'
 import type { Go } from '../App'
 
 /**
@@ -18,6 +18,8 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [owner, setOwner] = useState('')
   const [visibility, setVisibility] = useState(0)
+  // 录入去重：勾选后命中既有供应商（含黑名单/归档）的行直接跳过；默认只警告、仍导入。
+  const [skipDuplicates, setSkipDuplicates] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [report, setReport] = useState<ImportReport | null>(null)
@@ -44,7 +46,7 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
     setBusy(true)
     setError('')
     try {
-      setReport(await api.commitImport(file, mapping, owner, visibility))
+      setReport(await api.commitImport(file, mapping, owner, visibility, skipDuplicates))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -164,6 +166,20 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
             </div>
           </div>
 
+          {/* 录入去重选项 */}
+          <label className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={skipDuplicates}
+              onChange={(e) => setSkipDuplicates(e.target.checked)}
+            />
+            <span>
+              <b>跳过重复供应商</b>：按统一社会信用代码（确凿）/ 公司名（疑似）比对库中已有供应商
+              （含黑名单、归档）以及本批次前面的行；命中的行不导入。取消勾选则仍导入，仅在结果中警告。
+            </span>
+          </label>
+
           <div className="flex justify-end">
             <button className="btn-primary" disabled={busy} onClick={commit}>
               {busy ? '导入中…' : `开始导入 ${insp.total_data_rows} 行`}
@@ -178,10 +194,53 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
           <h2 className="text-sm font-semibold text-slate-700">导入结果</h2>
           <div className="flex gap-4 text-sm">
             <span className="text-emerald-600">成功 {report.created} 条</span>
+            {(report.skipped ?? 0) > 0 && (
+              <span className="text-amber-600">跳过重复 {report.skipped} 条</span>
+            )}
             <span className={report.failed > 0 ? 'text-red-600' : 'text-slate-400'}>
               失败 {report.failed} 条
             </span>
           </div>
+
+          {/* Duplicate warnings (命中既有供应商；跳过模式下这些行未导入） */}
+          {report.duplicates && report.duplicates.length > 0 && (
+            <div className="max-h-56 overflow-auto rounded-md border border-amber-100">
+              <table className="w-full text-xs">
+                <thead className="bg-amber-50 text-amber-800">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left">行号</th>
+                    <th className="px-3 py-1.5 text-left">本行公司名</th>
+                    <th className="px-3 py-1.5 text-left">命中已有供应商</th>
+                    <th className="px-3 py-1.5 text-left">强度 / 状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.duplicates.map((d, i) => (
+                    <tr key={i} className="border-t border-amber-50">
+                      <td className="px-3 py-1.5">第 {d.row} 行</td>
+                      <td className="px-3 py-1.5 text-slate-700">{d.name}</td>
+                      <td className="px-3 py-1.5 text-slate-600">
+                        {d.matches.slice(0, 2).map((m, j) => (
+                          <div key={j}>
+                            {m.name}
+                            {m.status === STATUS_BLACKLISTED && <span className="ml-1 text-red-600">🚫 黑名单</span>}
+                            {m.status === STATUS_ARCHIVED && <span className="ml-1 text-slate-400">已归档</span>}
+                          </div>
+                        ))}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        {d.matches[0]?.level === 'strong' ? (
+                          <span className="text-red-600">确凿（信用代码）</span>
+                        ) : (
+                          <span className="text-amber-700">疑似（同名）</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {report.errors && report.errors.length > 0 && (
             <div className="max-h-56 overflow-auto rounded-md border border-red-100">
               <table className="w-full text-xs">

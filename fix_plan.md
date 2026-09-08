@@ -14,10 +14,10 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    零外部依赖 / ~15MB"硬约束。个人版搜索继续用 SQLite FTS5（已在 `search.Index` 接口
    之后，行为被测试钉住）；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）
    实现同一接口，届时照 FTS5 测试对照即可。
-3. **Excel 导入逐行查重 + 合并**：录入去重原语 `CheckDuplicates` 已落地（手动表单/CLI/MCP
-   都用上了），批量导入尚未接入——ImportReport 可加 duplicates 维度，命中行提示/可跳过；
-   人工"合并重复供应商"流程也基于同一原语。可见性处置原语已就位，Excel 导入若未来带
-   可见性策略也可复用同一 `EnforceVisibilityPolicy`。
+3. **合并重复供应商（人工）**：录入去重原语 `CheckDuplicates` 已全链路落地（手动表单/CLI/MCP/
+   Excel 批量导入逐行查重，见下）；剩下的是人工"合并两家已确认重复的供应商"流程——把
+   B 的档案字段/附件/合作记录并入 A 后归档 B，基于同一匹配原语 + 一个 merge 服务方法。
+   可见性处置原语已就位，Excel 导入若未来带可见性策略也可复用 `EnforceVisibilityPolicy`。
 4. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
    保留不被引擎覆盖）。黑名单生命周期已落地（见下）；外部数据"被执行人→自动预警"可后挂。
 5. **可见性策略配置 UI + 定时处置**：处置状态机/API/CLI/MCP/前端徽标已落地（见下）。
@@ -29,6 +29,40 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    可纳入 scripts 构建/发布产物，随桌面版分发或单独提供（MCP 主机配置 command 即 srm-mcp）。
 
 ## 已完成
+
+### 2026-09-08：Excel 批量导入逐行查重——把录入去重接到批量入口
+
+录入去重原语 `CheckDuplicates` 此前只接了手动表单/CLI/MCP；批量 Excel 导入是最大的
+"一次灌进几百条重复供应商"入口，本环把同一套保守规则（信用代码=确凿 / 规范名=疑似，含
+黑名单/归档）接到 `Service.Import`。**默认只警告仍导入，勾选则命中行跳过**（flag-don't-
+block 哲学一致）。
+
+- **查重索引重构**（`internal/supplier/dedup.go`）：抽出 `dedupEntry{code,name,doc}`
+  （规范化后的匹配键只算一次）+ `matchEntry` + `loadDedupIndex`（整库 keyset 遍历一次，
+  含归档/黑名单）。手动录入的 `CheckDuplicates` 行为不变（改为复用同一排序/匹配），批量
+  导入则**整库只扫一遍**，每行 O(索引) 匹配——避免 N 行各做一次全表扫描，守住
+  "1000 条 Excel <3s"红线。
+- **批内查重**：本批次前面已成功创建的行会追加进索引，所以**同一个文件里两行相同公司**
+  第二行也会命中（warn 模式记一次警告，skip 模式跳过）。
+- **服务层**（`service.go`）：`Import(ctx, items, opts ImportOptions{SkipDuplicates})`；
+  `ImportReport` 加 `Skipped int` 与 `Duplicates []ImportDuplicate{Row,Name,Matches}`。
+  命中黑名单既有供应商时 `Matches[].status=blacklisted`（确凿在前、同级黑名单靠前）。
+  索引加载失败不致命（降级为不去重，Create 逐行仍会报存储错误）。
+- **API**：`POST /api/v1/import/commit` 增表单字段 `skip_duplicates=true|1|yes|on`；
+  默认 false（仍导入、报告 duplicates）。
+- **前端**（ImportView）：提交区加"跳过重复供应商"勾选框（默认勾选，批量场景更安全）；
+  结果栏加"跳过重复 N 条"琥珀计数 + 逐行警告表（行号/本行公司名/命中既有供应商[🚫黑名单/
+  已归档徽标]/确凿(信用代码)·疑似(同名)）。
+- 测试：`supplier/import_dedup_test.go` 5 例——①默认 warn：重复行仍创建但进 duplicates；
+  ②skip 模式：确凿(代码,名称可不同)命中跳过、新公司创建；③同文件批内重复（warn 记警告 /
+  skip 跳过第二行）；④命中黑名单既有供应商带 blacklisted 状态；⑤三家互不相同全导入零警告。
+  既有 importer 两个测试调用点补 `ImportOptions{}`（签名变更，最小改动）。全量 `go test`
+  默认+personal 全绿，enterprise/personal 编译通过；前端 tsc 通过。
+- E2E（personal/SQLite + 真实 .xlsx）：seed 1 家 → 批量 4 行（同名/同代码异名/新公司/
+  新公司再重复）`skip=true` → **created=1 skipped=3**，逐行 strong/probable/批内 strong
+  正确；`skip=false` 再导 → created=4、4 条警告；把含该信用代码的记录拉黑后重导 →
+  skipped=1、top match status=blacklisted strong。
+- **待办（后挂）**：人工"合并重复供应商"流程（合并字段/附件/合作记录后归档被合并方）。
 
 ### 2026-09-08：可见性策略收紧数据处置流程（五级权限体系收尾）——策略收紧骨架
 

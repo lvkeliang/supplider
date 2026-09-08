@@ -304,11 +304,22 @@ export interface ImportError {
   message: string
 }
 
+/** One imported row that matched an existing supplier (录入去重, batch). */
+export interface ImportDuplicate {
+  row: number
+  name: string
+  matches: DuplicateMatch[]
+}
+
 export interface ImportReport {
   created: number
   failed: number
+  /** Rows not imported because they matched an existing supplier (skip mode). */
+  skipped?: number
   ids?: string[]
   errors?: ImportError[]
+  /** Every row that looked like a duplicate — warned or skipped. */
+  duplicates?: ImportDuplicate[]
 }
 
 // Lifecycle / visibility constants mirrored from the Go domain package.

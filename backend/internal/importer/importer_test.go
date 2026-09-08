@@ -66,7 +66,7 @@ func TestTemplateInspectBuild(t *testing.T) {
 
 	// End-to-end through the service: the example row imports for real.
 	svc := supplier.NewService(memory.New())
-	rep := svc.Import(context.Background(), items)
+	rep := svc.Import(context.Background(), items, supplier.ImportOptions{})
 	if rep.Created != 1 || rep.Failed != 0 {
 		t.Fatalf("import report = %+v", rep)
 	}
@@ -126,7 +126,7 @@ func TestCustomColumnsAndValidation(t *testing.T) {
 	}
 
 	svc := supplier.NewService(memory.New())
-	rep := svc.Import(context.Background(), items)
+	rep := svc.Import(context.Background(), items, supplier.ImportOptions{})
 	if rep.Created != 1 {
 		t.Errorf("Created = %d, want 1", rep.Created)
 	}

@@ -85,13 +85,7 @@ func (s *Service) CheckDuplicates(ctx context.Context, candidate domain.BasicInf
 		cursor = page.NextCursor
 	}
 
-	sort.SliceStable(matches, func(i, j int) bool {
-		ri, rj := matchRank(matches[i]), matchRank(matches[j])
-		if ri != rj {
-			return ri < rj
-		}
-		return matches[i].Name < matches[j].Name
-	})
+	rankAndSortMatches(matches)
 	return matches, nil
 }
 
@@ -110,21 +104,41 @@ func matchRank(m DuplicateMatch) int {
 }
 
 func matchOne(targetCode, targetName string, doc *domain.Supplier) (DuplicateMatch, bool) {
-	existingCode := normalizeCreditCode(doc.BasicInfo.CreditCode)
-	existingName := normalizeCompanyName(doc.BasicInfo.CompanyName)
+	return matchEntry(targetCode, targetName, indexDoc(doc))
+}
 
+// dedupEntry is a library supplier with its match keys pre-normalized, so a
+// bulk pass (Excel import) normalizes every existing record ONCE instead of
+// re-normalizing it for each candidate row.
+type dedupEntry struct {
+	code string // normalized 18-char credit code ("" if unusable)
+	name string // normalized company name ("" if empty)
+	doc  *domain.Supplier
+}
+
+// indexDoc pre-normalizes a document's credit code and company name.
+func indexDoc(doc *domain.Supplier) dedupEntry {
+	return dedupEntry{
+		code: normalizeCreditCode(doc.BasicInfo.CreditCode),
+		name: normalizeCompanyName(doc.BasicInfo.CompanyName),
+		doc:  doc,
+	}
+}
+
+func matchEntry(targetCode, targetName string, e dedupEntry) (DuplicateMatch, bool) {
 	level, reason := "", ""
 	switch {
-	case targetCode != "" && existingCode != "" && targetCode == existingCode:
+	case targetCode != "" && e.code != "" && targetCode == e.code:
 		level = MatchStrong
 		reason = "统一社会信用代码与已有供应商一致（同一主体的确凿标识）"
-	case targetName != "" && existingName != "" && targetName == existingName:
+	case targetName != "" && e.name != "" && targetName == e.name:
 		level = MatchProbable
 		reason = "公司名称与已有供应商一致（注册名称高度唯一，疑似同一主体）"
 	default:
 		return DuplicateMatch{}, false
 	}
 
+	doc := e.doc
 	r := doc.BasicInfo.Region
 	return DuplicateMatch{
 		SupplierID: doc.ID,
@@ -136,6 +150,46 @@ func matchOne(targetCode, targetName string, doc *domain.Supplier) (DuplicateMat
 		Reason:     reason,
 		CreditCode: doc.BasicInfo.CreditCode,
 	}, true
+}
+
+// loadDedupIndex walks the WHOLE library once (including archived and
+// blacklisted records) and returns pre-normalized entries for bulk duplicate
+// checks. Bulk import calls this a single time and then matches every row
+// against the in-memory slice — avoiding one full table scan per row.
+func (s *Service) loadDedupIndex(ctx context.Context) ([]dedupEntry, error) {
+	entries := make([]dedupEntry, 0)
+	cursor := ""
+	for {
+		page, err := s.store.List(ctx, datamodel.Query{
+			Filter: datamodel.SupplierFilter{IncludeArchived: true},
+			Limit:  datamodel.MaxPageSize,
+			Cursor: cursor,
+			Sort:   datamodel.Sort{Field: datamodel.SortCreatedAt, Order: datamodel.OrderDesc},
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, doc := range page.Items {
+			entries = append(entries, indexDoc(doc))
+		}
+		if page.NextCursor == "" || len(entries) >= MaxExportDocs {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	return entries, nil
+}
+
+// rankAndSortMatches orders strong before probable and blacklisted first
+// within a level, mirroring CheckDuplicates' ordering.
+func rankAndSortMatches(matches []DuplicateMatch) {
+	sort.SliceStable(matches, func(i, j int) bool {
+		ri, rj := matchRank(matches[i]), matchRank(matches[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return matches[i].Name < matches[j].Name
+	})
 }
 
 // normalizeCreditCode trims and uppercases a credit code so formatting
