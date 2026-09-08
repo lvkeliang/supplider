@@ -19,15 +19,61 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    拉黑/处置"同一边界）；前端合并时从查重结果里直接挑选重复档案（当前是手输 id）。
 4. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
    保留不被引擎覆盖）。黑名单生命周期已落地（见下）；外部数据"被执行人→自动预警"可后挂。
-5. **可见性策略配置 UI + 定时处置**：处置状态机/API/CLI/MCP/前端徽标已落地（见下）。
-   尚缺：管理员"最高可见等级"配置界面（当前经 CLI/API `--max-level` 传参，默认取版本
-   FeatureFlag `visibility_levels-1`）、开机/每日定时跑 enforce（当前手动触发；个人版
-   可在 sidecar 起一个日级 ticker）。企业版通知服务把扫描报告推钉钉/企微的接口已用
-   同一 `VisibilityViolation` 形状预留。
+5. ~~**可见性策略配置 UI + 定时处置**~~ 已落地（见下：策略落库 GET/PUT /api/v1/visibility/policy、
+   设置页 SettingsView、sidecar 开机+每 24h 自动处置 ticker、MCP/CLI/HTTP 统一读持久化策略）。
+   后挂：企业版通知服务把扫描报告推钉钉/企微的接口已用同一 `VisibilityViolation` 形状预留
+   （小企业版/企业版接线即可）；策略变更审计可随操作审计日志（管理员平台）一并做。
 6. srm-mcp 打包/分发：`go build -tags personal` 已出独立 stdio 二进制约 12MB，后续
    可纳入 scripts 构建/发布产物，随桌面版分发或单独提供（MCP 主机配置 command 即 srm-mcp）。
 
 ## 已完成
+
+### 2026-09-08：可见性策略持久化 + sidecar 自动处置 ticker——策略收紧闭环收尾
+
+此前处置状态机完整（扫描/标记/缓冲/降级/申诉），但策略只在每次调用时以参数传入、
+处置只在人工 `--enforce` 时发生——桌面版"7 天超时自动降级"永远不会自己跑。本环：
+策略落库（随供应商数据库备份/迁移）、所有入口统一读持久化策略、sidecar 开机+每 24h
+自动处置。纯本地，无 AI。
+
+- **存储接口扩展**：`datamodel.SupplierStore` 加 `GetSetting/PutSetting(key,value)`
+  ——通用 settings 缝（策略是第一个用户，后续管理员配置同路径），随库存放、同走
+  备份/迁移。memory 适配器加 settings map；sqlite 适配器加 `settings` 表
+  （WITHOUT ROWID、upsert ON CONFLICT，`CREATE TABLE IF NOT EXISTS` 即旧库迁移，
+  无需 bump schemaVersion）。**contract 测试套件加 3 例**（round-trip/overwrite/
+  缺失 ErrNotFound），两适配器跑同一套。
+- **服务层**（`internal/supplier/policy.go`）：`SaveVisibilityPolicy`（normalized
+  后 JSON 落 settings）、`LoadVisibilityPolicy(ctx, fallback)`——返回有效策略+
+  `configured` 位；未配置/损坏值回落**接线层传入的 fallback**（业务代码仍不读版本
+  配置；损坏不楔死处置）。
+- **HTTP**：`GET /api/v1/visibility/policy`（生效策略 + configured + 版本上限）、
+  `PUT|POST /api/v1/visibility/policy`（保存并**立即处置一次**——收紧策略当下即完成
+  扫描→标记）；守卫：max_level 必填、0-4、不得超过版本上限（个人版 0-1，超出 400）。
+  violations/enforce/resolve 三处默认策略改为 `resolvePolicy`：请求显式覆盖 > 持久化
+  策略 > 版本默认。
+- **定时处置**（`httpapi.StartMaintenanceLoops`，sidecar main 接线）：开机 5s 后跑
+  一次处置 sweep（桌面 App 不是每天都开——开机兜底捕获超时降级），之后每 24h 一次；
+  仅在 flagged/downgraded/resolved>0 时打日志，错误/panic 只记日志不崩 sidecar。
+- **CLI**：`srm-cli visibility policy`（无参数=查看，标注"管理员已配置/版本默认"；
+  `--max-level N [--buffer-days N]`=保存并立即处置，回传 flagged/downgraded 计数）。
+- **MCP**：`visibility_violations` 无显式 max_level 时改读持久化策略（srm-mcp 直连
+  同一 SQLite，多进程 WAL 共享）；Skill 文档同步默认值语义。
+- **前端**：新 `SettingsView`（头部 ⚙ 设置 入口，App 路由加 `settings` 视图）——
+  可见等级下拉（按版本上限生成 L0..LtierMax + 中文等级名）、缓冲天数、保存即处置、
+  configured 徽标、处置结果条（新标记/降级/解除计数）。
+- 测试：`supplier/policy_test.go` 3 例——fallback 规范化、保存后**另一个 Service
+  实例**（=重启/多进程）读到持久策略、持久策略驱动 enforce 收紧（L0 cap 标记 L1）；
+  contract 套件 +3 例（两个适配器）。全量 `go test` 默认+personal 全绿，
+  enterprise/personal 编译通过；前端 tsc+vite 通过。
+- E2E（personal/SQLite + sidecar + CLI + MCP stdio）：默认策略 configured=false
+  L1/7 天；PUT max_level=2（超个人版上限）400、缺 max_level 400、9 越界 400；
+  CLI 保存 L0 → 立即处置；策略保存后新建 L1 供应商（未标记的 violation）→ **重启
+  sidecar，开机 5s 后日志 `visibility sweep (cap L0): flagged=1 ... remaining=2`，
+  记录自动进入待调整（截止 2026-09-15），全程零人工调用**；MCP 独立进程读同一库，
+  按持久化 L0 策略报 2 条 pending；CLI 扫描不带 `--max-level` 也按 L0 出报告。
+- **坑**：E2E 用 `pkill -f srm-e2e/suppliderd` 会连带杀掉执行命令的 wrapper shell
+  （其命令行也含该串）且匹配不到 setsid 启动的 `./suppliderd`（cmdline 不含该路径
+  串）——表现为"重启了但 boot sweep 没跑"（实际是旧进程没死）。改用 `pkill -x
+  suppliderd`（精确进程名）后正常。
 
 ### 2026-09-08：人工合并重复供应商——查重体系的"存量清理"闭环
 

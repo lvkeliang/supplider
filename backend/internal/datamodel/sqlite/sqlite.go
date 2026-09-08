@@ -135,6 +135,16 @@ CREATE TABLE IF NOT EXISTS supplier_categories (
     PRIMARY KEY (supplier_id, category)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_sc_category ON supplier_categories(category);
+
+-- Admin/config settings (visibility policy, future admin console values):
+-- small named JSON/text values that must travel with the supplier database
+-- through backup and migration. Additive IF NOT EXISTS migrates old files
+-- on the next open without a schema-version bump.
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+) WITHOUT ROWID;
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("sqlite: migrate: %w", err)
@@ -304,6 +314,32 @@ UPDATE suppliers
 		return fmt.Errorf("sqlite: archive %s: %w", id, err)
 	}
 	return tx.Commit()
+}
+
+// GetSetting implements datamodel.SupplierStore.
+func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", datamodel.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("sqlite: get setting %s: %w", key, err)
+	}
+	return value, nil
+}
+
+// PutSetting implements datamodel.SupplierStore (upsert).
+func (s *Store) PutSetting(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		key, value, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("sqlite: put setting %s: %w", key, err)
+	}
+	return nil
 }
 
 // List implements datamodel.SupplierStore: filtered, keyset-paginated.

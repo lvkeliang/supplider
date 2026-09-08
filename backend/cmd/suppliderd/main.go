@@ -51,18 +51,23 @@ func main() {
 
 	// Single binary serves API + embedded UI. CORS lets the Tauri webview
 	// (tauri://localhost / tauri.localhost) call the loopback sidecar.
-	handler := httpapi.CORS(
-		httpapi.New(svc, feats).
-			WithObjects(objects).
-			MountWebUI(webui.Dist()).
-			Mux,
-	)
+	apiServer := httpapi.New(svc, feats).
+		WithObjects(objects).
+		MountWebUI(webui.Dist())
+	handler := httpapi.CORS(apiServer.Mux)
 
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+
+	// Background maintenance: visibility disposition sweep at boot and
+	// once per 24h (the 7-day buffer → auto-downgrade must progress even
+	// though nobody runs the CLI on a desktop install).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	apiServer.StartMaintenanceLoops(ctx)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -71,13 +76,11 @@ func main() {
 	}()
 	log.Printf("suppliderd ready on http://%s", *addr)
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	<-ctx.Done()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
 	log.Println("suppliderd stopped")

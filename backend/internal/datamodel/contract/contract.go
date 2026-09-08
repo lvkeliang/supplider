@@ -44,6 +44,9 @@ func RunSupplierStoreTests(t *testing.T, newStore NewStore) {
 	t.Run("FilterOwner", func(t *testing.T) { testFilterOwner(t, newStore()) })
 	t.Run("FilterKeyword", func(t *testing.T) { testFilterKeyword(t, newStore()) })
 	t.Run("StoredDocumentIsIndependent", func(t *testing.T) { testStoredCopyIndependent(t, newStore()) })
+	t.Run("SettingsRoundTrip", func(t *testing.T) { testSettingsRoundTrip(t, newStore()) })
+	t.Run("SettingsOverwrite", func(t *testing.T) { testSettingsOverwrite(t, newStore()) })
+	t.Run("SettingsMissingNotFound", func(t *testing.T) { testSettingsMissingNotFound(t, newStore()) })
 	t.Run("Ping", func(t *testing.T) { testPing(t, newStore()) })
 }
 
@@ -432,5 +435,51 @@ func testPing(t *testing.T, st datamodel.SupplierStore) {
 	}
 	if err := st.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+// ---------- settings (admin/config values) ----------
+
+func testSettingsRoundTrip(t *testing.T, st datamodel.SupplierStore) {
+	ctx := context.Background()
+	if err := st.PutSetting(ctx, "visibility_policy", `{"max_level":1,"buffer_days":7}`); err != nil {
+		t.Fatalf("PutSetting: %v", err)
+	}
+	got, err := st.GetSetting(ctx, "visibility_policy")
+	if err != nil {
+		t.Fatalf("GetSetting after put: %v", err)
+	}
+	if got != `{"max_level":1,"buffer_days":7}` {
+		t.Errorf("setting round-trip mismatch: %q", got)
+	}
+	// Keys are independent.
+	if err := st.PutSetting(ctx, "other", "v2"); err != nil {
+		t.Fatalf("PutSetting other: %v", err)
+	}
+	if got, _ := st.GetSetting(ctx, "visibility_policy"); got != `{"max_level":1,"buffer_days":7}` {
+		t.Errorf("second write clobbered first key: %q", got)
+	}
+}
+
+func testSettingsOverwrite(t *testing.T, st datamodel.SupplierStore) {
+	ctx := context.Background()
+	if err := st.PutSetting(ctx, "k", "first"); err != nil {
+		t.Fatalf("PutSetting: %v", err)
+	}
+	if err := st.PutSetting(ctx, "k", "second"); err != nil {
+		t.Fatalf("PutSetting overwrite: %v", err)
+	}
+	got, err := st.GetSetting(ctx, "k")
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if got != "second" {
+		t.Errorf("overwrite did not take effect: %q", got)
+	}
+}
+
+func testSettingsMissingNotFound(t *testing.T, st datamodel.SupplierStore) {
+	if _, err := st.GetSetting(context.Background(), "never-written"); !errors.Is(err, datamodel.ErrNotFound) {
+		t.Errorf("missing setting must return ErrNotFound, got %v", err)
 	}
 }

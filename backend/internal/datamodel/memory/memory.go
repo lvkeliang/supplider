@@ -27,17 +27,37 @@ import (
 
 // Store is a goroutine-safe in-memory SupplierStore.
 type Store struct {
-	mu   sync.RWMutex
-	docs map[string]*domain.Supplier
+	mu       sync.RWMutex
+	docs     map[string]*domain.Supplier
+	settings map[string]string
 }
 
 // New returns an empty in-memory store.
 func New() *Store {
-	return &Store{docs: make(map[string]*domain.Supplier)}
+	return &Store{docs: make(map[string]*domain.Supplier), settings: make(map[string]string)}
 }
 
 func (s *Store) Ping(_ context.Context) error { return nil }
 func (s *Store) Close() error                 { return nil }
+
+// GetSetting implements datamodel.SupplierStore.
+func (s *Store) GetSetting(_ context.Context, key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.settings[key]
+	if !ok {
+		return "", datamodel.ErrNotFound
+	}
+	return v, nil
+}
+
+// PutSetting implements datamodel.SupplierStore.
+func (s *Store) PutSetting(_ context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings[key] = value
+	return nil
+}
 
 func (s *Store) Put(_ context.Context, doc *domain.Supplier) error {
 	if doc == nil || doc.ID == "" {

@@ -269,12 +269,17 @@ func (s *Server) toolVisibility(ctx context.Context, args json.RawMessage) (stri
 		MaxLevel *int `json:"max_level"`
 	}
 	decodeArgs(args, &a)
-	policy := supplier.VisibilityPolicy{}
+	policy := supplier.VisibilityPolicy{MaxLevel: featureflag.Default().VisibilityLevels - 1}
 	if a.MaxLevel != nil {
+		// Explicit argument wins.
 		policy.MaxLevel = *a.MaxLevel
 	} else {
-		// Default to the tier's enabled cap (personal = 2 levels → cap 1).
-		policy.MaxLevel = featureflag.Default().VisibilityLevels - 1
+		// No override: use the admin-persisted policy from the shared
+		// library (same SQLite file the desktop app writes), falling
+		// back to the tier-enabled cap (personal = 2 levels → cap 1).
+		if loaded, _, err := s.svc.LoadVisibilityPolicy(ctx, policy); err == nil {
+			policy = loaded
+		}
 	}
 	items, err := s.svc.ScanVisibilityViolations(ctx, policy)
 	if err != nil {

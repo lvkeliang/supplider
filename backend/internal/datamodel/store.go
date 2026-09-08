@@ -38,6 +38,15 @@ type SupplierStore interface {
 	// OFFSET: deep pagination walks the opaque Cursor instead.
 	List(ctx context.Context, q Query) (Page[*domain.Supplier], error)
 
+	// GetSetting reads one admin/config value by key. Settings are small
+	// named JSON/text values that belong with the supplier data (policy,
+	// admin configuration) so they travel with the same backup/migration
+	// path. Returns ErrNotFound when the key has never been written.
+	GetSetting(ctx context.Context, key string) (string, error)
+
+	// PutSetting upserts one admin/config value by key.
+	PutSetting(ctx context.Context, key, value string) error
+
 	// Ping verifies the backing store is reachable (used by /readyz).
 	Ping(ctx context.Context) error
 

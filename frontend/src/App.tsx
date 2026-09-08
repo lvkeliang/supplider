@@ -5,6 +5,7 @@ import { SupplierList } from './components/SupplierList'
 import { SupplierForm } from './components/SupplierForm'
 import { SupplierDetail } from './components/SupplierDetail'
 import { ImportView } from './components/ImportView'
+import { SettingsView } from './components/SettingsView'
 
 // Minimal in-app router (no extra dependency): the desktop MVP has a handful
 // of screens. Tauri/web history is not needed for the seed milestone.
@@ -14,6 +15,7 @@ type View =
   | { name: 'detail'; id: string }
   | { name: 'edit'; id: string }
   | { name: 'import' }
+  | { name: 'settings' }
 
 const TIER_LABELS: Record<string, string> = {
   personal: '个人版',
@@ -48,6 +50,14 @@ export default function App() {
           </button>
           <span className="text-sm text-slate-400">供应商资源管理</span>
           <div className="ml-auto flex items-center gap-2">
+            {/* 管理设置：可见性策略等管理员配置（个人版单用户即管理员）。 */}
+            <button
+              onClick={() => go({ name: 'settings' })}
+              className="rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              title="管理设置（可见性策略）"
+            >
+              ⚙ 设置
+            </button>
             {features && (
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">
                 {TIER_LABELS[features.tier] ?? features.tier}
@@ -87,6 +97,7 @@ export default function App() {
         {view.name === 'import' && (
           <ImportView go={go} visibilityLevels={features?.visibility_levels ?? 2} />
         )}
+        {view.name === 'settings' && <SettingsView go={go} />}
       </main>
     </div>
   )

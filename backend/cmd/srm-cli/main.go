@@ -19,7 +19,7 @@
 //	                                         人工审核闭环：标记已核验(默认)或误报忽略，清出审核队列
 //	srm-cli blacklist <id> [--reason ...] / srm-cli unblacklist <id>
 //	                                         黑名单（淘汰/禁用）：列入仍可搜到但醒目标记，移出恢复在库
-//	srm-cli visibility [--enforce] [--max-level N] [--buffer-days N] [--json]
+//	srm-cli visibility [policy] [--enforce] [--max-level N] [--buffer-days N] [--json]
 //	                                         可见性策略收紧：扫描/执行待调整→缓冲→超时自动降级处置
 //	srm-cli appeal <id> [--note ...]         录入者申诉待调整标记（暂停倒计时）
 //	srm-cli resolve-appeal <id> --grant|--deny [--max-level N]
@@ -132,6 +132,10 @@ Usage:
   srm-cli visibility [--enforce] [--max-level N] [--buffer-days N] [--json]
                                  可见性策略收紧处置：默认只读扫描不合规记录；
                                  --enforce 执行处置（标记待调整/缓冲7天/超时自动降级）
+  srm-cli visibility policy [--max-level N] [--buffer-days N] [--json]
+                                 查看/设置持久化可见性策略（最高可见等级+缓冲天数）；
+                                 不带参数=查看，带 --max-level=保存并立即处置一次；
+                                 sidecar 开机与每日 24h 自动按该策略处置
   srm-cli appeal <id> [--note 申诉理由]
                                  录入者对"待调整"标记申诉（暂停自动降级倒计时）
   srm-cli resolve-appeal <id> --grant|--deny [--max-level N]
@@ -1185,6 +1189,11 @@ type visibilityViolation struct {
 // read-only scan of records above the cap (通知录入者 basis); --enforce runs
 // the sweep (flag 待调整 / clear owner-fixed / timeout auto-downgrade).
 func cmdVisibility(args []string) error {
+	// `visibility policy` is the admin config subcommand (get/set the
+	// persisted cap + buffer); the rest is the scan/enforce report.
+	if len(args) > 0 && args[0] == "policy" {
+		return cmdVisibilityPolicy(args[1:])
+	}
 	fs := flag.NewFlagSet("visibility", flag.ContinueOnError)
 	enforce := fs.Bool("enforce", false, "run the disposition sweep (flag/downgrade) instead of a read-only scan")
 	maxLevel := fs.Int("max-level", -1, "policy cap (highest allowed visibility level); default = tier setting")
@@ -1269,6 +1278,95 @@ func cmdVisibility(args []string) error {
 	fmt.Printf("可见性策略：最高允许等级 %d。以下 %d 条记录不合规：\n", rep.Policy.MaxLevel, rep.Count)
 	printVisibilityRows(rep.Items)
 	fmt.Fprintln(os.Stderr, "\n提示：加 --enforce 执行处置（新违规标记\"待调整\"并给予 7 天缓冲，超时自动降级）。")
+	return nil
+}
+
+// cmdVisibilityPolicy reads or persists the admin visibility policy.
+// No flags → GET (show effective policy + whether it is admin-configured
+// or the tier default). With --max-level (and optional --buffer-days) →
+// persist; the server runs one enforce sweep immediately and reports the
+// flagged/downgraded counts. The sidecar afterwards sweeps automatically
+// at boot and every 24h using the saved policy.
+func cmdVisibilityPolicy(args []string) error {
+	fs := flag.NewFlagSet("visibility policy", flag.ContinueOnError)
+	maxLevel := fs.Int("max-level", -1, "persist this cap (highest allowed visibility level)")
+	bufferDays := fs.Int("buffer-days", 0, "buffer days before auto-downgrade (default 7)")
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+
+	if *maxLevel < 0 && *bufferDays == 0 {
+		// Read mode.
+		resp, err := http.Get(apiBase() + "/api/v1/visibility/policy")
+		if err != nil {
+			return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return decodeAPIError(resp)
+		}
+		var out struct {
+			Policy       supplierPolicy `json:"policy"`
+			Configured   bool           `json:"configured"`
+			TierMaxLevel int            `json:"tier_max_level"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return err
+		}
+		if *asJSON {
+			return json.NewEncoder(os.Stdout).Encode(out)
+		}
+		src := "版本默认（未配置自定义策略）"
+		if out.Configured {
+			src = "管理员已配置"
+		}
+		fmt.Printf("可见性策略：最高允许等级 L%d，缓冲期 %d 天（%s；本版本最高可用 L%d）。\n",
+			out.Policy.MaxLevel, out.Policy.BufferDays, src, out.TierMaxLevel)
+		if !out.Configured {
+			fmt.Fprintln(os.Stderr, "提示：用 `srm-cli visibility policy --max-level N` 收紧策略（sidecar 开机会自动处置一次，之后每日一次）。")
+		}
+		return nil
+	}
+
+	// Write mode: max-level is required (buffer alone would be ambiguous
+	// since GET vs SET is inferred from flags).
+	if *maxLevel < 0 {
+		return fmt.Errorf("--max-level is required when setting the policy (0-4)")
+	}
+	body := map[string]any{"max_level": *maxLevel}
+	if *bufferDays > 0 {
+		body["buffer_days"] = *bufferDays
+	}
+	rb, _ := json.Marshal(body)
+	resp, err := http.Post(apiBase()+"/api/v1/visibility/policy", "application/json", bytes.NewReader(rb))
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var out struct {
+		Policy supplierPolicy `json:"policy"`
+		Report struct {
+			Flagged    int `json:"flagged"`
+			Pending    int `json:"pending"`
+			Appealed   int `json:"appealed"`
+			Downgraded int `json:"downgraded"`
+			Resolved   int `json:"resolved"`
+		} `json:"report"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+	if *asJSON {
+		return json.NewEncoder(os.Stdout).Encode(out)
+	}
+	fmt.Printf("可见性策略已保存：最高允许等级 L%d，缓冲期 %d 天。\n", out.Policy.MaxLevel, out.Policy.BufferDays)
+	fmt.Printf("  立即处置：新标记待调整 %d ｜ 缓冲期中 %d ｜ 申诉中 %d ｜ 超时降级 %d ｜ 自行调整解除 %d\n",
+		out.Report.Flagged, out.Report.Pending, out.Report.Appealed, out.Report.Downgraded, out.Report.Resolved)
+	fmt.Fprintln(os.Stderr, "之后 sidecar 开机时与每日 24h 自动按此策略处置。")
 	return nil
 }
 

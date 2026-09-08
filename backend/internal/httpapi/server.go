@@ -30,6 +30,8 @@
 //	                                           (same filters as list)
 //	GET    /api/v1/reminders/expiring?within=90  qualification expiry scan
 //	                                           (90/30/7-day windows + expired)
+//	GET    /api/v1/visibility/policy          current visibility policy (admin config)
+//	PUT    /api/v1/visibility/policy          persist policy + run one enforce sweep
 //	GET    /api/v1/visibility/violations      visibility policy scan (read-only)
 //	POST   /api/v1/visibility/enforce         run the 待调整→downgrade sweep
 //	POST   /api/v1/suppliers/{id}/appeal-visibility
@@ -39,6 +41,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,6 +111,9 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/import/commit", s.handleImportCommit)
 	s.Mux.HandleFunc("GET /api/v1/export", s.handleExport)
 	s.Mux.HandleFunc("GET /api/v1/reminders/expiring", s.handleExpiringReminders)
+	s.Mux.HandleFunc("GET /api/v1/visibility/policy", s.handleGetVisibilityPolicy)
+	s.Mux.HandleFunc("PUT /api/v1/visibility/policy", s.handleSaveVisibilityPolicy)
+	s.Mux.HandleFunc("POST /api/v1/visibility/policy", s.handleSaveVisibilityPolicy)
 	s.Mux.HandleFunc("GET /api/v1/visibility/violations", s.handleVisibilityViolations)
 	s.Mux.HandleFunc("POST /api/v1/visibility/enforce", s.handleVisibilityEnforce)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/appeal-visibility", s.handleAppealVisibility)
@@ -683,18 +689,30 @@ func (s *Server) handleExpiringReminders(w http.ResponseWriter, r *http.Request)
 
 // ---------- visibility policy enforcement (可见性策略收紧) ----------
 
-// visibilityPolicy builds the policy from request params, defaulting to the
-// tier's enabled levels (personal: 0/1 → cap 1) and the PRD 7-day buffer.
-func (s *Server) visibilityPolicy(maxLevel int, hasMax bool, bufferDays int) supplier.VisibilityPolicy {
-	p := supplier.VisibilityPolicy{BufferDays: bufferDays}
-	if hasMax {
-		p.MaxLevel = maxLevel
-	} else {
-		// featureflag.VisibilityLevels counts enabled levels; the highest
-		// legal level is count-1 (personal = 2 levels → cap 1).
-		p.MaxLevel = s.Features.VisibilityLevels - 1
+// tierDefaultPolicy is the policy used until an admin saves an explicit
+// one: the cap is the tier's highest enabled level (personal: 0/1 → cap 1;
+// featureflag.VisibilityLevels counts enabled levels, highest is count-1)
+// and the buffer is the PRD-mandated 7 days.
+func (s *Server) tierDefaultPolicy() supplier.VisibilityPolicy {
+	return supplier.VisibilityPolicy{MaxLevel: s.Features.VisibilityLevels - 1, BufferDays: supplier.DefaultBufferDays}
+}
+
+// resolvePolicy builds the effective policy for a request: explicit
+// request overrides win; otherwise the admin-persisted policy is loaded;
+// failing that (never configured / unreadable) the tier default applies.
+func (s *Server) resolvePolicy(ctx context.Context, maxLevel int, hasMax bool, bufferDays int) supplier.VisibilityPolicy {
+	policy, _, err := s.Service.LoadVisibilityPolicy(ctx, s.tierDefaultPolicy())
+	if err != nil {
+		log.Printf("httpapi: load visibility policy: %v (using tier default)", err)
+		policy = s.tierDefaultPolicy()
 	}
-	return p
+	if hasMax {
+		policy.MaxLevel = maxLevel
+	}
+	if bufferDays > 0 {
+		policy.BufferDays = bufferDays
+	}
+	return policy
 }
 
 // policyParams reads optional max_level / buffer_days overrides from a JSON
@@ -727,6 +745,147 @@ func policyParams(w http.ResponseWriter, r *http.Request) (maxLevel int, hasMax 
 	return maxLevel, hasMax, bufferDays
 }
 
+// visibilityPolicyResponse is the GET .../policy payload: the effective
+// policy plus whether an admin explicitly configured it (vs. the tier
+// default) so the UI can label the setting.
+type visibilityPolicyResponse struct {
+	Policy       supplier.VisibilityPolicy `json:"policy"`
+	Configured   bool                      `json:"configured"`
+	TierMaxLevel int                       `json:"tier_max_level"`
+}
+
+// handleGetVisibilityPolicy answers the current effective visibility
+// policy (admin-persisted, else tier default).
+func (s *Server) handleGetVisibilityPolicy(w http.ResponseWriter, r *http.Request) {
+	policy, configured, err := s.Service.LoadVisibilityPolicy(r.Context(), s.tierDefaultPolicy())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, visibilityPolicyResponse{
+		Policy:       policy,
+		Configured:   configured,
+		TierMaxLevel: s.Features.VisibilityLevels - 1,
+	})
+}
+
+// savePolicyRequest is the PUT/POST .../policy body. MaxLevel is required
+// (it is the whole point of the policy); buffer days default to the PRD
+// 7-day cushion.
+type savePolicyRequest struct {
+	MaxLevel   *int `json:"max_level"`
+	BufferDays int  `json:"buffer_days"`
+}
+
+// handleSaveVisibilityPolicy persists the admin visibility policy and
+// immediately runs ONE enforce sweep, so tightening the cap flags
+// non-compliant records (待调整 + 7-day deadline) in the same request
+// rather than waiting for the next automatic daily sweep.
+func (s *Server) handleSaveVisibilityPolicy(w http.ResponseWriter, r *http.Request) {
+	var req savePolicyRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+	}
+	if req.MaxLevel == nil {
+		// CLI convenience: ?max_level=N
+		if v := r.URL.Query().Get("max_level"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				req.MaxLevel = &n
+			}
+		}
+	}
+	if req.BufferDays == 0 {
+		if v := r.URL.Query().Get("buffer_days"); v != "" {
+			req.BufferDays, _ = strconv.Atoi(v)
+		}
+	}
+	if req.MaxLevel == nil {
+		writeError(w, http.StatusBadRequest, "max_level is required (the highest allowed visibility level, 0-4)")
+		return
+	}
+	tierMax := s.Features.VisibilityLevels - 1
+	if *req.MaxLevel < domain.VisSelf || *req.MaxLevel > domain.VisCompany {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("max_level must be %d-%d", domain.VisSelf, domain.VisCompany))
+		return
+	}
+	if *req.MaxLevel > tierMax {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("this edition only enables visibility levels 0-%d; max_level cannot be set to %d", tierMax, *req.MaxLevel))
+		return
+	}
+	policy, err := s.Service.SaveVisibilityPolicy(r.Context(), supplier.VisibilityPolicy{
+		MaxLevel:   *req.MaxLevel,
+		BufferDays: req.BufferDays,
+	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	// Immediate sweep: the admin who tightens the policy gets the 扫描→标记
+	// result right away; the sidecar's daily loop keeps it moving afterwards.
+	rep, err := s.Service.EnforceVisibilityPolicy(r.Context(), policy)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"policy":     policy,
+		"configured": true,
+		"report":     rep,
+	})
+}
+
+// StartMaintenanceLoops launches the sidecar's background sweeps. The
+// visibility disposition sweep runs once shortly after startup (a desktop
+// app may not be open every day, so boot catches overdue downgrades) and
+// then once per 24h while running. Returns when ctx is cancelled.
+func (s *Server) StartMaintenanceLoops(ctx context.Context) {
+	go func() {
+		// Small delay so boot logs / readiness aren't tangled with the sweep.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+		s.runVisibilitySweep(ctx)
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.runVisibilitySweep(ctx)
+			}
+		}
+	}()
+}
+
+// runVisibilitySweep executes one disposition sweep against the persisted
+// (or tier-default) policy, logging the outcome. Failures are logged and
+// retried on the next tick — the loop must never crash the sidecar.
+func (s *Server) runVisibilitySweep(ctx context.Context) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("httpapi: visibility sweep panic: %v", rec)
+		}
+	}()
+	policy, _, err := s.Service.LoadVisibilityPolicy(ctx, s.tierDefaultPolicy())
+	if err != nil {
+		log.Printf("httpapi: visibility sweep: load policy: %v", err)
+		return
+	}
+	rep, err := s.Service.EnforceVisibilityPolicy(ctx, policy)
+	if err != nil {
+		log.Printf("httpapi: visibility sweep: %v", err)
+		return
+	}
+	if rep.Flagged > 0 || rep.Downgraded > 0 || rep.Resolved > 0 {
+		log.Printf("httpapi: visibility sweep (cap L%d): flagged=%d downgraded=%d resolved=%d pending=%d appealed=%d remaining=%d",
+			policy.MaxLevel, rep.Flagged, rep.Downgraded, rep.Resolved, rep.Pending, rep.Appealed, len(rep.Items))
+	}
+}
+
 // visibilityReport is the GET .../violations payload: the read-only scan
 // (通知录入者 basis), most urgent first.
 type visibilityReport struct {
@@ -751,7 +910,7 @@ func (s *Server) handleVisibilityViolations(w http.ResponseWriter, r *http.Reque
 	if v := q.Get("buffer_days"); v != "" {
 		bufferDays, _ = strconv.Atoi(v)
 	}
-	policy := s.visibilityPolicy(maxLevel, hasMax, bufferDays)
+	policy := s.resolvePolicy(r.Context(), maxLevel, hasMax, bufferDays)
 	items, err := s.Service.ScanVisibilityViolations(r.Context(), policy)
 	if err != nil {
 		writeServiceError(w, err)
@@ -770,7 +929,8 @@ func (s *Server) handleVisibilityViolations(w http.ResponseWriter, r *http.Reque
 // fixed their level are cleared, and overdue un-appealed records are
 // auto-downgraded to the cap. Returns the sweep report.
 func (s *Server) handleVisibilityEnforce(w http.ResponseWriter, r *http.Request) {
-	policy := s.visibilityPolicy(policyParams(w, r))
+	maxLevel, hasMax, bufferDays := policyParams(w, r)
+	policy := s.resolvePolicy(r.Context(), maxLevel, hasMax, bufferDays)
 	rep, err := s.Service.EnforceVisibilityPolicy(r.Context(), policy)
 	if err != nil {
 		writeServiceError(w, err)
@@ -831,7 +991,7 @@ func (s *Server) handleResolveVisibilityAppeal(w http.ResponseWriter, r *http.Re
 	if req.MaxLevel != nil {
 		maxLevel = *req.MaxLevel
 	}
-	policy := s.visibilityPolicy(maxLevel, hasMax, req.BufferDays)
+	policy := s.resolvePolicy(r.Context(), maxLevel, hasMax, req.BufferDays)
 	doc, err := s.Service.ResolveVisibilityAppeal(r.Context(), r.PathValue("id"), grant, policy)
 	if err != nil {
 		writeServiceError(w, err)

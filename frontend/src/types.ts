@@ -231,6 +231,21 @@ export interface VisibilityEnforceReport {
   items: VisibilityViolation[]
 }
 
+/** Current persisted policy (GET /api/v1/visibility/policy). */
+export interface VisibilityPolicyResponse {
+  policy: VisibilityPolicy
+  /** false = tier default, no admin policy saved yet. */
+  configured: boolean
+  tier_max_level: number
+}
+
+/** Save-policy response: the saved policy plus the immediate sweep report. */
+export interface VisibilityPolicySaveResponse {
+  policy: VisibilityPolicy
+  configured: boolean
+  report: VisibilityEnforceReport
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */

@@ -15,6 +15,8 @@ import type {
   Supplier,
   SupplierSummary,
   VisibilityEnforceReport,
+  VisibilityPolicyResponse,
+  VisibilityPolicySaveResponse,
   VisibilityReport,
 } from './types'
 
@@ -197,6 +199,13 @@ export const api = {
     request<VisibilityEnforceReport>('POST', '/api/v1/visibility/enforce',
       { ...(maxLevel !== undefined ? { max_level: maxLevel } : {}),
         ...(bufferDays !== undefined ? { buffer_days: bufferDays } : {}) }),
+  // 持久化可见性策略：GET 返回当前生效策略（管理员配置或版本默认）；
+  // PUT 保存策略并立即执行一次处置扫描（sidecar 开机/每日 24h 也会自动跑）。
+  getVisibilityPolicy: () =>
+    request<VisibilityPolicyResponse>('GET', '/api/v1/visibility/policy'),
+  saveVisibilityPolicy: (maxLevel: number, bufferDays?: number) =>
+    request<VisibilityPolicySaveResponse>('PUT', '/api/v1/visibility/policy',
+      { max_level: maxLevel, ...(bufferDays !== undefined ? { buffer_days: bufferDays } : {}) }),
 
   // Upload an attachment (multipart). Returns the updated supplier document.
   // The hard limit is 50MB (enforced server-side; 413 on overflow).

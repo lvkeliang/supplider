@@ -42,7 +42,7 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 | `expiring_qualifications` | 资质到期提醒（已过期 / 90/30/7 天窗口），按紧迫度排序 | `within`（默认 90） |
 | `compare_suppliers` | 多家供应商并排对比（地域/品类/最高资质/评分/绩效/风险） | `ids[]`（≥2） |
 | `blacklist_supplier` | 淘汰阶段：列入黑名单（`remove:false` + `reason`，仍可搜到但醒目标记禁用）或移出（`remove:true`） | `id`, `reason?`, `remove?` |
-| `visibility_violations` | 可见性策略收紧扫描（只读）：列出可见范围超出最高允许等级的在库供应商，含处置状态（待调整/申诉中/已超期）与剩余天数。用于提醒录入者调整或申诉；**标记/降级/申诉裁决由管理员执行，Agent 不自动处置** | `max_level?`（默认个人版=1） |
+| `visibility_violations` | 可见性策略收紧扫描（只读）：列出可见范围超出最高允许等级的在库供应商，含处置状态（待调整/申诉中/已超期）与剩余天数。用于提醒录入者调整或申诉；**标记/降级/申诉裁决由管理员执行，Agent 不自动处置** | `max_level?`（默认取管理员已保存的策略，未配置时个人版=1） |
 
 供应商 id 形如 `sup_2026_XXXXXX`，由 `search_suppliers` / `add_supplier` 返回。
 
