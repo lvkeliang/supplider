@@ -31,6 +31,21 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-08：三构建标签运行时验证 + go vet 全量复检
+
+个人版功能闭环后做跨版本质量复检：`go vet`（default/personal）零告警；全量
+`go test -tags personal` 绿；`personal / enterprise / small_business` 三个 tag 均
+**编译并运行**通过。首次在运行时（不只是编译）验证 `small_business`：功能矩阵
+正确报告 `visibility_levels:5 / rbac / audit_log`、`storage:mongodb` 等目标
+标签；建供应商（L1 可见性）→ FTS 命中 → 持久化可见性策略默认 cap L4 → 备份 zip
+全部正常——**业务代码三版本同构**得到确认。
+
+**已知现状（非缺陷）**：`small_business` 的 feature flag 报告 MongoDB/Meilisearch/
+MinIO/Qdrant，但当前接线（`storefactory/tier_small_business.go` 等）仍用 SQLite +
+localfs 适配器跑——MongoDB/Meilisearch/MinIO 适配器是小企业版后续的**适配层替换**
+工作（业务代码不改，符合"接口先行，实现可换"）。这与优先级 #2（Meilisearch 适配器）
+对应。
+
 ### 2026-09-08：补齐项目 README（三种使用方式 / CLI / 数据备份 / 架构红线）
 
 仓库 README 原本只有一行标题。个人版 MVP 功能已闭环，补上面向用户与贡献者的
