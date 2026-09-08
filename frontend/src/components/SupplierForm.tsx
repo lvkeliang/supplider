@@ -313,17 +313,36 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
           <button className="btn-ghost !py-1 text-xs"
             onClick={() => setForm((f) => ({ ...f, perfs: [...f.perfs, { project: '', score: 0 }] }))}>＋ 添加</button>
         </div>
+        <p className="text-xs text-slate-400">
+          总评分可直接填写（0–5）；也可只填交付/质量/配合度三维，系统按三维均值计入综合评分。
+        </p>
         {form.perfs.map((p, i) => (
-          <div key={i} className="grid grid-cols-12 gap-2">
-            <input className="input col-span-5" placeholder="项目名称" value={p.project}
-              onChange={(e) => setForm((f) => updateArr(f, 'perfs', i, { project: e.target.value }))} />
-            <input className="input col-span-2" type="number" step="0.1" min="0" max="5" placeholder="评分0-5"
-              value={p.score || ''}
-              onChange={(e) => setForm((f) => updateArr(f, 'perfs', i, { score: Number(e.target.value) }))} />
-            <input className="input col-span-4" placeholder="评价反馈" value={p.feedback ?? ''}
-              onChange={(e) => setForm((f) => updateArr(f, 'perfs', i, { feedback: e.target.value }))} />
-            <button className="btn-danger col-span-1 !px-2 text-xs"
-              onClick={() => setForm((f) => ({ ...f, perfs: f.perfs.filter((_, j) => j !== i) }))}>删</button>
+          <div key={i} className="space-y-2 rounded-md border border-slate-100 p-2">
+            <div className="flex gap-2">
+              <input className="input flex-1" placeholder="项目名称" value={p.project}
+                onChange={(e) => setForm((f) => updateArr(f, 'perfs', i, { project: e.target.value }))} />
+              <input className="input w-28" type="number" step="0.1" min="0" max="5" placeholder="总评 0-5"
+                value={p.score || ''} title="总评分（0–5）；留空则按交付/质量/配合度均值"
+                onChange={(e) => setForm((f) => updateArr(f, 'perfs', i, { score: Number(e.target.value) }))} />
+              <button className="btn-danger !px-2 text-xs"
+                onClick={() => setForm((f) => ({ ...f, perfs: f.perfs.filter((_, j) => j !== i) }))}>删</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {([
+                ['delivery', '交付'],
+                ['quality', '质量'],
+                ['cooperation', '配合度'],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-1 text-xs text-slate-500">
+                  {label}
+                  <input className="input w-16" type="number" step="0.1" min="0" max="5" placeholder="0-5"
+                    value={p[key] || ''}
+                    onChange={(e) => setForm((f) => updateArr(f, 'perfs', i, { [key]: Number(e.target.value) }))} />
+                </label>
+              ))}
+              <input className="input min-w-40 flex-1" placeholder="评价反馈" value={p.feedback ?? ''}
+                onChange={(e) => setForm((f) => updateArr(f, 'perfs', i, { feedback: e.target.value }))} />
+            </div>
           </div>
         ))}
       </section>

@@ -148,6 +148,31 @@ type Performance struct {
 	Feedback    string  `json:"feedback,omitempty"`
 }
 
+// MaxScore is the upper bound for the overall and per-dimension scores.
+const MaxScore = 5.0
+
+// EffectiveScore is the record's contribution to the aggregate rating:
+// the explicit overall score wins; otherwise it is the mean of whichever
+// 交付/质量/配合度 dimensions were set. A record with no scores returns 0
+// (callers exclude it from the average).
+func (p Performance) EffectiveScore() float64 {
+	if p.Score > 0 {
+		return p.Score
+	}
+	var sum float64
+	n := 0
+	for _, v := range []float64{p.Delivery, p.Quality, p.Cooperation} {
+		if v > 0 {
+			sum += v
+			n++
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	return sum / float64(n)
+}
+
 // Risk review outcomes (人工审核闭环). A reviewer resolves a flagged
 // supplier once they have inspected the dossier / paper certificates.
 const (

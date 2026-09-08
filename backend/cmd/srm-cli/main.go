@@ -411,7 +411,24 @@ func printSupplier(s *domain.Supplier) {
 		fmt.Printf("  产品/服务: %s %s\n", p.Name, p.UnitPriceRange)
 	}
 	for _, p := range s.PerformanceHistory {
-		fmt.Printf("  绩效:   %s %s  %.1f★ %s\n", p.Date, p.Project, p.Score, p.Feedback)
+		// Effective score: explicit overall, else mean of the dimensions
+		// set; render the 交付/质量/配合度 breakdown when present.
+		score := p.EffectiveScore()
+		dims := ""
+		if p.Delivery > 0 || p.Quality > 0 || p.Cooperation > 0 {
+			parts := make([]string, 0, 3)
+			if p.Delivery > 0 {
+				parts = append(parts, fmt.Sprintf("交付 %.1f", p.Delivery))
+			}
+			if p.Quality > 0 {
+				parts = append(parts, fmt.Sprintf("质量 %.1f", p.Quality))
+			}
+			if p.Cooperation > 0 {
+				parts = append(parts, fmt.Sprintf("配合度 %.1f", p.Cooperation))
+			}
+			dims = "  （" + strings.Join(parts, " / ") + "）"
+		}
+		fmt.Printf("  绩效:   %s %s  %.1f★%s %s\n", p.Date, p.Project, score, dims, p.Feedback)
 	}
 	if len(s.CustomFields) > 0 {
 		fmt.Println("  自定义字段:")

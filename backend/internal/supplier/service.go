@@ -56,6 +56,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Supplier,
 	if in.Visibility < domain.VisSelf || in.Visibility > domain.VisCompany {
 		return nil, fmt.Errorf("supplier: visibility must be 0-4, got %d", in.Visibility)
 	}
+	if err := validatePerformance(in.Performance); err != nil {
+		return nil, err
+	}
 
 	now := s.now()
 	doc := &domain.Supplier{
@@ -158,6 +161,9 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*domai
 		doc.ProductsServices = *in.Products
 	}
 	if in.Performance != nil {
+		if err := validatePerformance(*in.Performance); err != nil {
+			return nil, err
+		}
 		addChange(diffField("performance_history", doc.PerformanceHistory, *in.Performance, now, in.Source))
 		doc.PerformanceHistory = *in.Performance
 	}
@@ -534,8 +540,10 @@ func recomputeRating(doc *domain.Supplier) {
 	var sum float64
 	n := 0
 	for _, p := range doc.PerformanceHistory {
-		if p.Score > 0 {
-			sum += p.Score
+		// Effective score: explicit overall score, else mean of the
+		// 交付/质量/配合度 dimensions set on the record.
+		if s := p.EffectiveScore(); s > 0 {
+			sum += s
 			n++
 		}
 	}

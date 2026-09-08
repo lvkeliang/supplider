@@ -542,10 +542,17 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
               <div key={i} className="rounded-md border border-slate-100 px-3 py-2 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{p.project}</span>
-                  <span className="text-amber-500">★ {p.score}</span>
+                  {p.score ? <span className="text-amber-500">★ {p.score}</span> : null}
                   <span className="ml-auto text-xs text-slate-400">{p.date}</span>
                 </div>
-                {p.feedback && <div className="text-slate-500">{p.feedback}</div>}
+                {(p.delivery || p.quality || p.cooperation) && (
+                  <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-600">
+                    {p.delivery ? <span>交付 <b className="text-amber-600">{p.delivery}</b></span> : null}
+                    {p.quality ? <span>质量 <b className="text-amber-600">{p.quality}</b></span> : null}
+                    {p.cooperation ? <span>配合度 <b className="text-amber-600">{p.cooperation}</b></span> : null}
+                  </div>
+                )}
+                {p.feedback && <div className="mt-0.5 text-slate-500">{p.feedback}</div>}
               </div>
             ))}
           </div>
