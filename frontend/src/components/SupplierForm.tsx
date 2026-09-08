@@ -231,10 +231,57 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
             <input className="input" type="date" value={form.basic.establishment_date ?? ''}
               onChange={(e) => setBasic({ establishment_date: e.target.value })} />
           </div>
+          <div>
+            <label className="label">供应商类型</label>
+            <input className="input" list="supplier-types" placeholder="施工商/贸易商/服务商…"
+              value={form.basic.supplier_type ?? ''}
+              onChange={(e) => setBasic({ supplier_type: e.target.value })} />
+            <datalist id="supplier-types">
+              <option value="施工商" />
+              <option value="建筑施工" />
+              <option value="贸易商" />
+              <option value="服务商" />
+              <option value="设备租赁商" />
+              <option value="生产商" />
+            </datalist>
+          </div>
           <div className="col-span-2">
             <label className="label">经营范围</label>
             <textarea className="input" rows={2} value={form.basic.business_scope ?? ''}
               onChange={(e) => setBasic({ business_scope: e.target.value })} />
+          </div>
+        </div>
+      </section>
+
+      {/* 联系方式 — 联系人/电话是合作前尽调与日常联系的核心字段，也用于
+          空壳检测 R202（缺联系人/电话会被标记）。 */}
+      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700">联系方式</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">联系人</label>
+            <input className="input" value={form.basic.contact_name ?? ''}
+              onChange={(e) => setBasic({ contact_name: e.target.value })} />
+          </div>
+          <div>
+            <label className="label">联系电话</label>
+            <input className="input" value={form.basic.contact_phone ?? ''}
+              onChange={(e) => setBasic({ contact_phone: e.target.value })} />
+          </div>
+          <div>
+            <label className="label">联系邮箱</label>
+            <input className="input" type="email" value={form.basic.contact_email ?? ''}
+              onChange={(e) => setBasic({ contact_email: e.target.value })} />
+          </div>
+          <div>
+            <label className="label">网址 / 官网</label>
+            <input className="input" value={form.basic.website ?? ''}
+              onChange={(e) => setBasic({ website: e.target.value })} />
+          </div>
+          <div className="col-span-2">
+            <label className="label">详细地址</label>
+            <input className="input" value={form.basic.address ?? ''}
+              onChange={(e) => setBasic({ address: e.target.value })} />
           </div>
         </div>
       </section>
