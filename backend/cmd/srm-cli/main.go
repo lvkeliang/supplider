@@ -12,6 +12,7 @@
 //	srm-cli search <keyword> [filters]   (FTS backend lands later; same flags)
 //	srm-cli info <id> [--json]
 //	srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
+//	srm-cli backup [--out file.zip]        download a full library backup (db snapshot + attachments)
 //	srm-cli compare <id> <id>... [--criteria price,delivery,qual]
 //	srm-cli expiring [--within N] [--json]   资质到期提醒 (90/30/7 天窗口 + 已过期)
 //	srm-cli risk [id] [--json]               空壳特征检测：无 id 列审核队列，带 id 看该供应商信号
@@ -67,6 +68,8 @@ func main() {
 		err = cmdSearch(args)
 	case "export":
 		err = cmdExport(args)
+	case "backup":
+		err = cmdBackup(args)
 	case "compare":
 		err = cmdCompare(args)
 	case "expiring":
@@ -112,6 +115,7 @@ Usage:
   srm-cli search <keyword> [filters]
   srm-cli info <id> [--json]
   srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
+  srm-cli backup [--out file.zip]   下载完整数据备份（数据库快照+全部附件 zip；恢复=停应用后解压覆盖数据目录）
   srm-cli compare <id> <id>... [--criteria price,delivery,qual]
   srm-cli expiring [--within N] [--json]
                                  资质到期提醒：列出已过期/7 天内/30 天内/90 天内到期的资质
@@ -502,6 +506,51 @@ func cmdExport(args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "exported %s suppliers (%s, %d bytes) → %s\n",
 		countExported(fmtType, data), fmtType, len(data), *out)
+	return nil
+}
+
+// cmdBackup downloads a full library backup (数据备份: consistent DB
+// snapshot + all attachments as a zip). Restore: unzip over the data
+// directory while the app/sidecar is stopped.
+func cmdBackup(args []string) error {
+	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
+	out := fs.String("out", "", "output zip path (default supplider-backup-<date>.zip; '-' = stdout)")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+
+	resp, err := http.Get(apiBase() + "/api/v1/backup")
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+
+	if *out == "-" {
+		if _, err := io.Copy(os.Stdout, resp.Body); err != nil {
+			return err
+		}
+		return nil
+	}
+	path := *out
+	if path == "" {
+		path = fmt.Sprintf("supplider-backup-%s.zip", time.Now().UTC().Format("20060102"))
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	n, err := io.Copy(f, resp.Body)
+	if err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "backup written: %s (%d bytes). Restore: stop the app, unzip over the data directory, restart.\n", path, n)
 	return nil
 }
 

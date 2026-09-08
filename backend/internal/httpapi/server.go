@@ -30,6 +30,8 @@
 //	                                           (same filters as list)
 //	GET    /api/v1/reminders/expiring?within=90  qualification expiry scan
 //	                                           (90/30/7-day windows + expired)
+//	GET    /api/v1/backup                     download a full library backup
+//	                                           (zip: DB snapshot + attachments)
 //	GET    /api/v1/visibility/policy          current visibility policy (admin config)
 //	PUT    /api/v1/visibility/policy          persist policy + run one enforce sweep
 //	GET    /api/v1/visibility/violations      visibility policy scan (read-only)
@@ -70,8 +72,15 @@ type Server struct {
 	// Objects is the attachment store; nil disables attachment upload/
 	// download (handlers answer 501). Wired via WithObjects.
 	Objects objectstore.Store
-	Mux     *http.ServeMux
+	// Backup streams a full library archive (zip: database snapshot +
+	// attachments); nil disables GET /api/v1/backup (501) — e.g. the
+	// in-memory dev build has nothing on disk to back up.
+	Backup BackupFunc
+	Mux    *http.ServeMux
 }
+
+// BackupFunc streams one backup archive to w (see internal/backup).
+type BackupFunc func(ctx context.Context, w io.Writer) error
 
 // New wires routes and returns the server.
 func New(svc *supplier.Service, feats featureflag.Features) *Server {
@@ -84,6 +93,14 @@ func New(svc *supplier.Service, feats featureflag.Features) *Server {
 // returns the server for chaining. Pass nil to leave attachments disabled.
 func (s *Server) WithObjects(store objectstore.Store) *Server {
 	s.Objects = store
+	return s
+}
+
+// WithBackup wires the full-library backup archive writer (zip) and
+// returns the server for chaining. Pass nil to disable GET /api/v1/backup
+// (the endpoint answers 501).
+func (s *Server) WithBackup(fn BackupFunc) *Server {
+	s.Backup = fn
 	return s
 }
 
@@ -111,6 +128,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/import/commit", s.handleImportCommit)
 	s.Mux.HandleFunc("GET /api/v1/export", s.handleExport)
 	s.Mux.HandleFunc("GET /api/v1/reminders/expiring", s.handleExpiringReminders)
+	s.Mux.HandleFunc("GET /api/v1/backup", s.handleBackup)
 	s.Mux.HandleFunc("GET /api/v1/visibility/policy", s.handleGetVisibilityPolicy)
 	s.Mux.HandleFunc("PUT /api/v1/visibility/policy", s.handleSaveVisibilityPolicy)
 	s.Mux.HandleFunc("POST /api/v1/visibility/policy", s.handleSaveVisibilityPolicy)
@@ -1092,6 +1110,28 @@ func (s *Server) handleShellRiskQueue(w http.ResponseWriter, r *http.Request) {
 // workbook (human-readable exchange, round-trippable through import). The
 // 100-row page cap does not apply — export pages through the full result
 // set server-side; the service enforces a high safety cap instead.
+// handleBackup streams a full library backup (数据备份): a consistent DB
+// snapshot plus all attachment files as a zip. The snapshot (VACUUM INTO)
+// is taken before any archive bytes are written, so snapshot failures can
+// still be reported as JSON; mid-stream failures (client disconnect) are
+// logged.
+func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
+	if s.Backup == nil {
+		writeError(w, http.StatusNotImplemented, "backup is not available (no on-disk data directory)")
+		return
+	}
+	stamp := time.Now().UTC().Format("20060102")
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="supplider-backup.zip"; filename*=UTF-8''`+
+			url.PathEscape(fmt.Sprintf("supplider备份_%s.zip", stamp)))
+	if err := s.Backup(r.Context(), w); err != nil {
+		log.Printf("httpapi: backup: %v", err)
+		// Only effective if no archive bytes were written yet.
+		writeError(w, http.StatusInternalServerError, "backup failed")
+	}
+}
+
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	docs, err := s.Service.Export(r.Context(), filterFromQuery(r.URL.Query()))
 	if err != nil {

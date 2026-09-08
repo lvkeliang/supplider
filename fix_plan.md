@@ -31,6 +31,42 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-08：数据备份导出（数据库一致性快照 + 全部附件 zip）——备份/迁移基线
+
+PRD 管理员平台要求"数据备份与迁移"。个人版所有家当就是 `<DataDir>/supplider.db`
++ `<DataDir>/attachments/`，库丢了一切归零，此前没有任何备份入口。本环补齐**导出
+备份**（恢复为停应用解压覆盖，MVP 够用且零风险）。纯本地、无外部依赖。
+
+- **SQLite 快照**（`sqlite.SnapshotTo(ctx, path)`）：`VACUUM INTO '<path>'`——
+  在 **运行中**的库上产出独立一致快照（含全部已提交事务，无需 -wal/-shm 附带，
+  目标路径必须不存在）。比裸拷 DB 文件安全（WAL 下裸拷可能不一致）。
+- **归档包**（`internal/backup`）：`WriteArchive(ctx, w, snapshotFn, attachmentsRoot,
+  extra)` 流式写 zip——`supplider.db`（临时快照）+ `attachments/<供应商id>/<文件>`
+  （WalkDir 保持层级）+ 末尾 `manifest.json`（format/version/created_at/
+  attachment_count/extra，未来恢复路径可识别和迁移旧备份）。附件目录不存在也
+  正常出包（仅库）。
+- **HTTP**：`GET /api/v1/backup` 流式返回 zip（文件名 `supplider备份_YYYYMMDD.zip`）；
+  `Server.WithBackup(fn)` 接线，无文件系统（memory 开发构建）时 501。接线在
+  suppliderd main 用**能力断言**：store 实现 `SnapshotTo`（*sqlite.Store）且
+  objectstore 实现 `Root()`（*localfs.Store）才启用——业务代码不碰具体类型。
+- **CLI**：`srm-cli backup [--out file.zip]`（`-`=stdout），下载并提示恢复步骤。
+- **前端**：设置页新增"数据备份与迁移"卡片——下载按钮（直链 GET，浏览器/
+  Tauri webview 直接下载）+ 恢复说明（关闭应用、解压覆盖 `com.supplider.desktop`
+  数据目录，附三系统路径）。
+- 测试：`sqlite/backup_test.go` 1 例（写入供应商+settings → 快照 → 独立打开
+  快照内容齐全；**快照后源库再写不入快照**=时点副本）；`backup/backup_test.go`
+  2 例（zip 含 DB 内容 + 嵌套附件保持层级 + manifest 字段/extra；无附件目录
+  仍出包含 db/manifest 的有效 zip）。全量 `go test` 默认+personal 全绿，
+  enterprise/personal 编译通过；前端 tsc+vite 通过。
+- E2E（personal/SQLite）：建供应商+上传附件 → `srm-cli backup` 得 zip（69KB
+  快照 + attachments/<id>/<唯一前缀>_license.jpg + manifest，count=1）→
+  解压到**全新空目录** → 新 sidecar 以该目录启动 → 全文搜索命中供应商 ✓、
+  按档案记录的附件 URL 下载 **字节一致** ✓；memory 开发构建 `/api/v1/backup`
+  回 501 ✓。备份恢复后附件 key 路径（首段=供应商 id）无需任何重定向。
+- **后挂**：备份加密（PRD 提"备份加密"，与 SQLCipher 字段加密同批做小企业/
+  企业版）；应用内"一键恢复"（需停服换文件，桌面端可走 Tauri 重启流程，
+  当前文档化的手动恢复足够 MVP）。
+
 ### 2026-09-08：三维绩效评价（交付/质量/配合度）端到端——"使用"阶段评分闭环
 
 PRD 生命周期"使用"环节要求**绩效评价（交付/质量/配合度）**。数据模型早有

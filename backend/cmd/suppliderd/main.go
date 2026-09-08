@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/supplider/supplider/backend/internal/backup"
 	"github.com/supplider/supplider/backend/internal/featureflag"
 	"github.com/supplider/supplider/backend/internal/httpapi"
 	"github.com/supplider/supplider/backend/internal/objectfactory"
@@ -53,6 +55,7 @@ func main() {
 	// (tauri://localhost / tauri.localhost) call the loopback sidecar.
 	apiServer := httpapi.New(svc, feats).
 		WithObjects(objects).
+		WithBackup(backupWriter(store, objects)).
 		MountWebUI(webui.Dist())
 	handler := httpapi.CORS(apiServer.Mux)
 
@@ -84,6 +87,38 @@ func main() {
 		log.Printf("shutdown: %v", err)
 	}
 	log.Println("suppliderd stopped")
+}
+
+// dbSnapshotter is the backup capability implemented by the SQLite adapter
+// (VACUUM INTO); the in-memory dev store lacks it.
+type dbSnapshotter interface {
+	SnapshotTo(ctx context.Context, destPath string) error
+}
+
+// rootReporter is implemented by the local-FS object store; it locates the
+// attachments tree for inclusion in a backup.
+type rootReporter interface {
+	Root() string
+}
+
+// backupWriter wires GET /api/v1/backup when the wired adapters support it:
+// a consistent DB snapshot plus every attachment, zipped. Returns nil
+// (endpoint answers 501) on ephemeral/in-memory wiring.
+func backupWriter(store interface{}, objects interface{}) httpapi.BackupFunc {
+	sn, ok := store.(dbSnapshotter)
+	if !ok {
+		return nil
+	}
+	root := ""
+	if rr, ok := objects.(rootReporter); ok {
+		root = rr.Root()
+	}
+	return func(ctx context.Context, w io.Writer) error {
+		_, err := backup.WriteArchive(ctx, w, sn.SnapshotTo, root, map[string]any{
+			"tier": tier.Current(),
+		})
+		return err
+	}
 }
 
 func envOr(key, def string) string {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import { api, apiUrl } from '../api'
 import { DocumentCard } from './Card'
 import type { Go } from '../App'
 import { VIS_LABELS } from '../types'
@@ -121,6 +121,18 @@ export function SettingsView({ go }: { go: Go }) {
             )}
           </div>
         )}
+      </DocumentCard>
+
+      <DocumentCard title="数据备份与迁移" defaultOpen>
+        <p className="mb-3 text-sm text-slate-500">
+          一次下载完整库备份（<b>.zip</b>）：数据库一致性快照 + 全部附件文件，应用运行中也可安全导出。
+          建议定期复制到网盘/移动硬盘。恢复/迁移：<b>关闭应用</b>，把备份解压覆盖应用数据目录
+          （<code className="rounded bg-slate-100 px-1">com.supplider.desktop</code>，
+          Windows 在 %APPDATA%、macOS 在 ~/Library/Application Support、Linux 在 ~/.local/share 下）后重新打开即可。
+        </p>
+        <a className="btn-ghost inline-block" href={apiUrl('/api/v1/backup')} download>
+          ⬇ 下载数据备份（.zip）
+        </a>
       </DocumentCard>
     </div>
   )
