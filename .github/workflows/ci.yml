@@ -1,0 +1,106 @@
+# Continuous integration for Supplider.
+#
+# The Go module in backend/ ships three product tiers behind build tags
+# (personal / small_business / enterprise) sharing ONE codebase. CI runs the
+# full test suite under the default (memory sandbox) and `personal` (SQLite —
+# the shipping configuration) tags, and compiles the two other tiers so tag
+# drift breaks the build immediately. The frontend is built the same way the
+# release script builds it, and every Go release artifact is cross-compiled
+# here (pure Go + modernc sqlite, no C toolchain needed).
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Go backend (tests × tags, vet, gofmt)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: backend/go.sum
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt required on:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet (default + personal)
+        run: |
+          go vet ./...
+          go vet -tags personal ./...
+      - name: go test (default tags — memory sandbox)
+        run: go test ./...
+      - name: go test (personal — SQLite, the shipping configuration)
+        run: go test -tags personal ./...
+      - name: compile all tiers and every command
+        run: |
+          go build -tags personal ./cmd/...
+          go build -tags small_business ./...
+          go build -tags enterprise ./...
+
+  frontend:
+    name: Frontend build (tsc + vite, embed sync)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      # Same script the release uses: builds frontend/dist AND syncs the
+      # bundle into backend/internal/webui/dist (go:embed web mode).
+      - run: bash scripts/build-frontend.sh
+      - name: verify embedded bundle
+        run: test -f backend/internal/webui/dist/index.html
+
+  cross-compile:
+    name: Release artifacts (sidecar + CLI/MCP, 5 triples)
+    runs-on: ubuntu-24.04
+    needs: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: backend/go.sum
+      # Builds src-tauri/binaries/suppliderd-<triple> for all five desktop
+      # targets — proves the sidecar cross-compiles before the release tag.
+      - name: build Go sidecar (5 triples)
+        run: bash scripts/build-sidecar.sh
+      # Builds dist/tools/{srm-cli,srm-mcp}-<triple> + sha256sums.txt.
+      - name: build CLI/MCP tools (5 triples)
+        run: bash scripts/build-tools.sh
+      - name: verify all triples present
+        run: |
+          set -e
+          for t in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
+                   x86_64-pc-windows-msvc x86_64-apple-darwin aarch64-apple-darwin; do
+            ext=""
+            [ "$t" = "x86_64-pc-windows-msvc" ] && ext=".exe"
+            test -f "src-tauri/binaries/suppliderd-$t$ext"
+            test -f "dist/tools/srm-cli-$t$ext"
+            test -f "dist/tools/srm-mcp-$t$ext"
+          done
+          cat dist/tools/sha256sums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-mcp-tools
+          path: dist/tools/
+          retention-days: 14

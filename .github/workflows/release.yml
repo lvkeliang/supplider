@@ -1,0 +1,137 @@
+# Desktop + tools release.
+#
+# Cutting a tag (v0.1.0, v0.2.0-rc1, ...) builds:
+#   1. Desktop installers via Tauri (Windows NSIS, macOS dmg arm64 + x64,
+#      Linux deb + AppImage) — each matrix runner prebuilds the matching
+#      pure-Go sidecar into src-tauri/binaries/ (scripts/build-sidecar.sh
+#      cross-compiles ALL five triples from any host, no C toolchain).
+#   2. Standalone srm-cli / srm-mcp / suppliderd binaries for five triples
+#      (linux/windows/macOS × amd64/arm64) with sha256sums.
+# Everything attaches to the GitHub Release named after the tag.
+#
+# No code-signing secrets are configured yet: Windows/macOS artifacts ship
+# unsigned (Gatekeeper/SmartScreen warnings; see docs/mcp/SETUP.md for the
+# quarantine removal). Adding TAURI_SIGNING_PRIVATE_KEY later enables the
+# Tauri updater without changing this matrix.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: Desktop bundle (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-2022
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - platform: macos-15
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: dmg
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Tauri 2 Linux system dependencies (WebKit GTK, AppIndicator, ...).
+      - name: Install Linux bundle dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: npm ci (frontend)
+        shell: bash
+        run: npm ci --prefix frontend
+
+      # Builds frontend/dist (which Tauri bundles) and syncs the embedded
+      # webui bundle. Runs in Git Bash on the Windows runner too.
+      - name: Build frontend bundle
+        shell: bash
+        run: bash scripts/build-frontend.sh
+
+      # Pure-Go cross compile (CGO_ENABLED=0): produces every
+      # suppliderd-<triple>[.exe]; `tauri build` consumes the one matching
+      # this runner's target via bundle.externalBin.
+      - name: Build Go sidecar (all triples)
+        shell: bash
+        run: bash scripts/build-sidecar.sh
+
+      - name: Build Tauri installer
+        uses: tauri-apps/tauri-action@v0
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Supplider ${{ github.ref_name }}'
+          releaseBody: 'See assets below for desktop installers and CLI/MCP tools.'
+          releaseDraft: false
+          prerelease: false
+          # No @tauri-apps/cli dependency is checked into the repo (the Tauri
+          # shell lives in src-tauri/), so invoke the CLI through npx. The
+          # CLI auto-discovers ./src-tauri/tauri.conf.json from the repo root.
+          tauriScript: npx --yes @tauri-apps/cli@^2 build
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+  binaries:
+    name: CLI / MCP / daemon binaries (5 triples)
+    runs-on: ubuntu-24.04
+    needs: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: backend/go.sum
+
+      - name: build srm-cli + srm-mcp
+        run: bash scripts/build-tools.sh
+      - name: build suppliderd daemons (standalone web mode)
+        run: bash scripts/build-sidecar.sh
+
+      - name: collect release binaries
+        run: |
+          set -e
+          mkdir -p dist/release
+          cp dist/tools/srm-cli-* dist/tools/srm-mcp-* src-tauri/binaries/suppliderd-* dist/release/
+          cd dist/release
+          sha256sum * > SHA256SUMS.txt
+          ls -lh
+
+      - name: attach to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/release/* --clobber

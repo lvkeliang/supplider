@@ -6,9 +6,12 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 ## 下一步优先级（个人版 MVP）
 
 1. **Tauri 安装包真机验证**：shell 代码与 sidecar 已完成并通过 HTTP 层 E2E（见下），
-   但本机无 Rust 工具链，未跑过 `tauri build`；需在有 Rust 的机器执行
-   `scripts/build-sidecar.sh && cd src-tauri && tauri build`，验证安装包体积（目标 ~15MB）
-   与双击拉起 sidecar。图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。
+   本机无 Rust 工具链未跑过 `tauri build`；**现已由 release.yml 在 GitHub runner
+   （含 Rust）上构建**——打 `v*` tag 即产出四平台安装包。剩余验证只需：tag 后下载
+   Release 里的安装包，确认体积（目标 ~15MB 安装器；实测 stripped sidecar ~16MB，
+   嵌入后安装器预计 20-25MB 量级）与双击拉起 sidecar；未签名，macOS 需解除隔离属性。
+   图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。后挂：代码签名/公证
+   （TAURI_SIGNING_PRIVATE_KEY secrets）以启用 Tauri 自动更新。
 2. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
    Meilisearch 是 Rust 独立 server 二进制、无可内嵌 Go 库，塞进个人版会破坏"单二进制
    零外部依赖 / ~15MB"硬约束。个人版搜索继续用 SQLite FTS5（已在 `search.Index` 接口
@@ -26,10 +29,40 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    （小企业版/企业版接线即可）；策略变更审计可随操作审计日志（管理员平台）一并做。
 6. ~~srm-mcp 打包/分发~~ 已落地（见下：`scripts/build-tools.sh` 交叉编译 srm-mcp +
    srm-cli 五平台产物到 dist/tools/ + sha256sums；`docs/mcp/SETUP.md` 安装配置指南）。
-   后挂：GitHub Releases 工作流（CI 中跑 build-frontend/build-sidecar/build-tools 三脚本
-   并上传产物）——属 CI 环境工作，本机无法验证。
+   ~~GitHub Releases 工作流~~ **已落地**（见下：ci.yml + release.yml；`v*` tag 自动
+   产出四平台桌面安装包与五平台 CLI/MCP/daemon 二进制并附 SHA256SUMS）。
 
 ## 已完成
+
+### 2026-09-09：CI 与 GitHub Releases 流水线——一键产出四平台安装包
+
+个人版 MVP 功能闭环后，最大缺口是"用户拿不到安装包"：`tauri build` 需要 Rust，
+本机无法验证。本环补齐 CI/CD（PRD"一套 CI/CD 产出 Tauri 安装包"），全程本机可验证
+的只有脚本/actionlint；真正的 Tauri 打包在 GitHub runner（有 Rust）上跑。
+
+- **`.github/workflows/ci.yml`**（push master / PR，三 job）：
+  - backend：gofmt 门禁（顺带修了历史遗留 `cmd/genicons/main.go` 未格式化）、
+    `go vet`（default+personal）、`go test`（default memory 与 personal SQLite 两套）、
+    编译检查 personal（含 `./cmd/...`）+ small_business + enterprise，tag 漂移即红；
+  - frontend：npm ci → `build-frontend.sh`，校验 frontend/dist 与内嵌 webui 两处产物；
+  - cross-compile：实跑 `build-sidecar.sh` 与 `build-tools.sh`（纯 Go modernc，
+    Linux runner 即可交叉全部 5 triple），断言 15 个产物齐备，upload-artifact 留存。
+- **`.github/workflows/release.yml`**（`v*` tag 触发）：
+  - desktop 矩阵：windows-2022/NSIS、macos-15-arm/dmg、**macos-15-intel**/dmg、
+    ubuntu-22.04/deb+AppImage。每 runner：setup-go/node/rust（rust target 按矩阵）、
+    Linux 装 webkit2gtk-4.1 等系统依赖、npm ci、build-frontend、build-sidecar（
+    一次产出全部 5 个 sidecar triple，tauri 只消费当前 target 的 externalBin），
+    最后 `tauri-apps/tauri-action@v0` 经 `npx @tauri-apps/cli@^2` 打包发布。
+  - binaries job（needs desktop）：build-tools + build-sidecar → 收 15 个二进制 +
+    生成统一 SHA256SUMS → `gh release upload --clobber` 挂到同一 Release。
+  - 无签名密钥时产出未签名安装包（Tauri 在 macOS 自动 ad-hoc 签名）；留了
+    TAURI_SIGNING_PRIVATE_KEY 与 Tauri updater 的后挂位。
+- 本机验证：`actionlint`（go1.26 工具链）零告警（发现 macos-13 标签已下线，改用
+  macos-15-intel）；清空产物后实跑两个 build 脚本，5 triple sidecar / 10 个 CLI/MCP
+  二进制全部产出；模拟 release 收集步骤（cp+sha256sum 16 文件）成功。
+- README 补"通过 CI 发布"段；SETUP.md 的 macOS 隔离解除说明被安装包复用。
+- **未在 GitHub 上实跑过**（需推送 + tag）；首次发布需盯一次 Windows/macOS runner，
+  风险点：tauri-action 版本漂移、Git Bash 跑 .sh、macOS 未签名 dmg 的 Gatekeeper。
 
 ### 2026-09-09：本地供应商偏好（本地优先排序）全链路——PRD 五大痛点之"本地偏好"
 

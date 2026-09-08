@@ -36,6 +36,14 @@ cd src-tauri && cargo install tauri-cli --version "^2" && tauri build
 Tauri 启动时会自动拉起 Go sidecar（`suppliderd-<target>`），轮询就绪后加载界面；
 退出时自动结束进程。双击即用，安装包约 15 MB。
 
+**通过 CI 发布（推荐）**：推送 `v*` 标签即触发 `.github/workflows/release.yml`，
+GitHub Actions 在 Windows / macOS（arm64 + Intel）/ Linux 四种 runner 上交叉编译
+sidecar 并打包安装包（NSIS / dmg / deb / AppImage），同时上传五平台的
+`srm-cli`、`srm-mcp` 与独立 `suppliderd`（含 SHA256SUMS）到该 tag 的
+GitHub Release。当前产物未做代码签名，macOS 首次打开需解除隔离属性
+（见 [docs/mcp/SETUP.md](docs/mcp/SETUP.md)）。每次推送到 master / PR 由
+`.github/workflows/ci.yml` 跑三 tag 编译与全部测试。
+
 ### 2. 从源码运行（开发者）
 
 ```bash

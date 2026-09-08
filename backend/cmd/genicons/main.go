@@ -242,8 +242,8 @@ func ico(pngs ...[]byte) []byte {
 		}
 		buf.WriteByte(w)
 		buf.WriteByte(w)
-		buf.WriteByte(0) // color count (0 = true color)
-		buf.WriteByte(0) // reserved
+		buf.WriteByte(0)                                    // color count (0 = true color)
+		buf.WriteByte(0)                                    // reserved
 		binary.Write(&buf, binary.LittleEndian, uint16(1))  // planes
 		binary.Write(&buf, binary.LittleEndian, uint16(32)) // bits per pixel
 		binary.Write(&buf, binary.LittleEndian, uint32(len(data)))
