@@ -304,6 +304,18 @@ export interface ImportError {
   message: string
 }
 
+/** Result counts of a supplier merge (合并重复供应商). */
+export interface MergeResult {
+  master_id: string
+  duplicate_id: string
+  performance_added: number
+  attachments_added: number
+  qualifications_added: number
+  categories_added: number
+  products_added: number
+  custom_fields_added: number
+}
+
 /** One imported row that matched an existing supplier (录入去重, batch). */
 export interface ImportDuplicate {
   row: number

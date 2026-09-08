@@ -131,6 +131,34 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     }
   }
 
+  // 合并重复供应商：把另一条档案并入当前档案（当前档案保留身份，并入对方的
+  // 绩效/附件/资质/品类/产品线/自定义字段），对方随后归档。黑名单/归档记录会
+  // 被服务端拒绝。用于清理历史重复录入。
+  const mergeDuplicate = async () => {
+    const other = prompt('输入要并入本档案的【重复供应商 id】（sup_ 开头，可在列表/查重结果中找到）。\n该供应商的绩效/附件/资质等将并入当前档案，然后被归档：')
+    if (other === null || other.trim() === '') return
+    const dupId = other.trim()
+    if (dupId === id) {
+      setError('不能与自身合并')
+      return
+    }
+    if (!confirm(`确认将 ${dupId} 并入当前档案？\n· 当前档案保留，吸收对方的绩效/附件/资质/品类/自定义字段（冲突时以当前档案为准）\n· ${dupId} 将被归档（历史保留，列表默认隐藏）\n该操作不可撤销。`)) {
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.mergeSuppliers(id, dupId)
+      load()
+      const m = res.merged
+      alert(`合并完成：并入绩效 ${m.performance_added}、附件 ${m.attachments_added}、资质 ${m.qualifications_added}、品类 ${m.categories_added} 条；${dupId} 已归档。`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // 可见性策略收紧：对"待调整"标记提出申诉（暂停自动降级倒计时，等待管理员
   // 裁决）。录入者也可直接在编辑里把可见范围调到合规等级，标记会在下一次
   // 处置扫描时自动解除。
@@ -203,6 +231,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                 <button className="btn-primary" disabled={busy} onClick={unblacklist}>移出黑名单</button>
               ) : (
                 <>
+                  <button className="btn-ghost" disabled={busy} onClick={mergeDuplicate} title="把另一条重复档案并入当前档案（并入绩效/附件/资质等，对方归档），用于清理历史重复录入">🔀 合并重复</button>
                   <button className="btn-ghost" disabled={busy} onClick={blacklist} title="列入黑名单（淘汰/禁用）：仍可搜到但醒目标记">🚫 列入黑名单</button>
                   <button className="btn-danger" disabled={busy} onClick={archive}>归档</button>
                 </>

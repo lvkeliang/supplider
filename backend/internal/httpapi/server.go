@@ -15,6 +15,8 @@
 //	POST   /api/v1/suppliers/{id}/restore
 //	POST   /api/v1/suppliers/{id}/blacklist      add to blacklist (淘汰/黑名单)
 //	POST   /api/v1/suppliers/{id}/unblacklist    remove from blacklist
+//	POST   /api/v1/suppliers/{id}/merge          merge a duplicate into this
+//	                                           supplier (合并重复供应商；other archived)
 //	GET    /api/v1/suppliers/{id}/risk          live shell-company rule report
 //	POST   /api/v1/suppliers/{id}/risk-check    re-run rules + persist verdict
 //	POST   /api/v1/suppliers/{id}/risk-review   human resolves flag (verified|dismissed)
@@ -94,6 +96,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/restore", s.handleRestore)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/blacklist", s.handleBlacklist)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/unblacklist", s.handleUnblacklist)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/merge", s.handleMerge)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/{id}/risk", s.handleSupplierRisk)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-check", s.handleRiskCheck)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-review", s.handleRiskReview)
@@ -280,6 +283,31 @@ func (s *Server) handleUnblacklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, doc)
+}
+
+// mergeRequest is the POST .../merge body. The path id is the MASTER (the
+// record that survives); duplicate_id is the record folded in and archived.
+type mergeRequest struct {
+	DuplicateID string `json:"duplicate_id"`
+}
+
+// handleMerge consolidates a duplicate supplier into the path-id master
+// (合并重复供应商): collections are unioned, history retained, duplicate
+// archived. Returns the updated master plus a count summary.
+func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
+	var req mergeRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+	}
+	if strings.TrimSpace(req.DuplicateID) == "" {
+		req.DuplicateID = r.URL.Query().Get("duplicate_id")
+	}
+	doc, res, err := s.Service.MergeSuppliers(r.Context(), r.PathValue("id"), req.DuplicateID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"supplier": doc, "merged": res})
 }
 
 // ---------- attachments ----------

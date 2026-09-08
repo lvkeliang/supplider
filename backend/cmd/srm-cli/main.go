@@ -81,6 +81,8 @@ func main() {
 		err = cmdBlacklist(args, false)
 	case "duplicates", "dedup":
 		err = cmdDuplicates(args)
+	case "merge":
+		err = cmdMerge(args)
 	case "visibility", "vis":
 		err = cmdVisibility(args)
 	case "appeal":
@@ -124,6 +126,9 @@ Usage:
   srm-cli unblacklist <id>       移出黑名单，恢复在库
   srm-cli duplicates --name 名称 [--credit-code 代码] [--province 省] [--city 市]
                                  录入去重：按信用代码(强)/公司名(疑似)查重，含黑名单/归档
+  srm-cli merge <保留id> <并入并归档id>
+                                 合并重复供应商：保留前者（身份/基本信息），并入后者的
+                                 绩效/附件/资质/品类/产品线/自定义字段后归档后者；含黑名单拒绝
   srm-cli visibility [--enforce] [--max-level N] [--buffer-days N] [--json]
                                  可见性策略收紧处置：默认只读扫描不合规记录；
                                  --enforce 执行处置（标记待调整/缓冲7天/超时自动降级）
@@ -1041,6 +1046,64 @@ func blacklistedHint(ms []duplicateMatch) string {
 		}
 	}
 	return ""
+}
+
+// ---------- merge (合并重复供应商) ----------
+
+// mergeResult mirrors supplier.MergeResult JSON.
+type mergeResult struct {
+	MasterID          string `json:"master_id"`
+	DuplicateID       string `json:"duplicate_id"`
+	PerformanceAdded  int    `json:"performance_added"`
+	AttachmentsAdded  int    `json:"attachments_added"`
+	QualsAdded        int    `json:"qualifications_added"`
+	CategoriesAdded   int    `json:"categories_added"`
+	ProductsAdded     int    `json:"products_added"`
+	CustomFieldsAdded int    `json:"custom_fields_added"`
+}
+
+// cmdMerge consolidates one duplicate into a master: `merge <keep> <archive>`.
+// The master keeps its identity and absorbs the duplicate's collections; the
+// duplicate is archived (history retained). Blacklisted/archived records are
+// refused server-side.
+func cmdMerge(args []string) error {
+	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() < 2 {
+		return fmt.Errorf("merge requires two supplier ids: merge <保留(主)> <并入并归档(重复)>")
+	}
+	masterID, dupID := fs.Arg(0), fs.Arg(1)
+	body, _ := json.Marshal(map[string]string{"duplicate_id": dupID})
+	resp, err := http.Post(
+		apiBase()+"/api/v1/suppliers/"+url.PathEscape(masterID)+"/merge",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var out struct {
+		Supplier domain.Supplier `json:"supplier"`
+		Merged   mergeResult     `json:"merged"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+	if *asJSON {
+		return json.NewEncoder(os.Stdout).Encode(out)
+	}
+	fmt.Printf("merged %s → into %s（%s）\n", out.Merged.DuplicateID, out.Merged.MasterID, out.Supplier.BasicInfo.CompanyName)
+	fmt.Printf("  并入：绩效 %d 条、附件 %d 个、资质 %d 项、品类 %d 个、产品线 %d 条、自定义字段 %d 个\n",
+		out.Merged.PerformanceAdded, out.Merged.AttachmentsAdded, out.Merged.QualsAdded,
+		out.Merged.CategoriesAdded, out.Merged.ProductsAdded, out.Merged.CustomFieldsAdded)
+	fmt.Printf("  重复供应商 %s 已归档（历史保留）；保留档案的综合评分 %.1f★。\n",
+		out.Merged.DuplicateID, out.Supplier.Rating)
+	return nil
 }
 
 // ---------- review (人工审核闭环) ----------

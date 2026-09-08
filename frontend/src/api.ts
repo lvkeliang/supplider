@@ -8,6 +8,7 @@ import type {
   Features,
   ImportReport,
   Inspection,
+  MergeResult,
   Page,
   RiskReport,
   ShellRiskReport,
@@ -170,6 +171,15 @@ export const api = {
     request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/blacklist`, { reason }),
   unblacklistSupplier: (id: string) =>
     request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/unblacklist`),
+
+  // 合并重复供应商：把 duplicateId 的绩效/附件/资质/品类/产品线/自定义字段并入
+  // id（保留 id 的身份），duplicateId 随后归档。黑名单/归档记录服务端拒绝。
+  mergeSuppliers: (masterId: string, duplicateId: string) =>
+    request<{ supplier: Supplier; merged: MergeResult }>(
+      'POST',
+      `/api/v1/suppliers/${encodeURIComponent(masterId)}/merge`,
+      { duplicate_id: duplicateId },
+    ),
 
   // 可见性策略收紧处置（数据处置流程）。appeal 是录入者动作（暂停自动降级
   // 倒计时）；resolve 是管理员裁决；violations 只读扫描；enforce 执行处置。
