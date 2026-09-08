@@ -403,15 +403,18 @@ func (s *Service) Import(ctx context.Context, items []ImportItem, opts ImportOpt
 		in.Source = domain.SourceImport
 
 		// Duplicate check (pre-normalized index; matches carry status).
-		targetCode := normalizeCreditCode(in.BasicInfo.CreditCode)
-		targetName := normalizeCompanyName(in.BasicInfo.CompanyName)
-		if matches := findInDedupIndex(targetCode, targetName, index); len(matches) > 0 {
+		k := keyFrom(in.BasicInfo)
+		if matches := findInDedupIndex(k, index); len(matches) > 0 {
 			rep.Duplicates = append(rep.Duplicates, ImportDuplicate{
 				Row:     it.Row,
 				Name:    in.BasicInfo.CompanyName,
 				Matches: matches,
 			})
-			if opts.SkipDuplicates {
+			// Skip mode honors only high-confidence matches. The possible
+			// tier (name merely similar) is warn-only: skipping it could
+			// discard a genuinely new, distinct company. Matches are
+			// rank-sorted, so the head level decides.
+			if opts.SkipDuplicates && matches[0].Level != MatchPossible {
 				rep.Skipped++
 				continue
 			}
@@ -428,26 +431,6 @@ func (s *Service) Import(ctx context.Context, items []ImportItem, opts ImportOpt
 		index = append(index, indexDoc(doc)) // later rows in this file now match it
 	}
 	return rep
-}
-
-// findInDedupIndex matches one candidate against a pre-built index, returning
-// matches ordered strong→probable / blacklisted-first (same ordering as
-// CheckDuplicates). Returns nil when the candidate has no usable identity.
-func findInDedupIndex(targetCode, targetName string, index []dedupEntry) []DuplicateMatch {
-	if targetCode == "" && targetName == "" {
-		return nil
-	}
-	matches := make([]DuplicateMatch, 0)
-	for _, e := range index {
-		if m, ok := matchEntry(targetCode, targetName, e); ok {
-			matches = append(matches, m)
-		}
-	}
-	rankAndSortMatches(matches)
-	if len(matches) > MaxExportDocs {
-		matches = matches[:MaxExportDocs]
-	}
-	return matches
 }
 
 // List returns a page of supplier SUMMARIES (list endpoints never return

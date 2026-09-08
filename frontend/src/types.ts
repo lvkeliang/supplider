@@ -158,7 +158,8 @@ export interface DuplicateMatch {
   province?: string
   city?: string
   status: string // active | blacklisted | archived
-  level: 'strong' | 'probable' | string
+  /** strong=信用代码确凿, probable=同名疑似, possible=名称相近（简称/同音/笔误，仅供参考） */
+  level: 'strong' | 'probable' | 'possible' | string
   reason: string
   credit_code?: string
 }

@@ -178,14 +178,19 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
           }`}
         >
           <div className="font-medium">
-            ⚠ 发现 {dupes.length} 家可能重复的供应商（按信用代码/公司名），录入不会被阻断，请核对：
+            ⚠ 发现 {dupes.length} 家可能重复的供应商（按信用代码/公司名/名称相近），录入不会被阻断，请核对：
           </div>
           <ul className="mt-1 divide-y divide-current/10">
             {dupes.map((d) => (
               <li key={d.supplier_id} className="py-1">
                 <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => go({ name: 'detail', id: d.supplier_id })}>
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${d.level === 'strong' ? 'bg-red-200 text-red-900' : 'bg-amber-200 text-amber-900'}`}>
-                    {d.level === 'strong' ? '确凿·信用代码一致' : '疑似·名称一致'}
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${
+                    d.level === 'strong' ? 'bg-red-200 text-red-900'
+                      : d.level === 'possible' ? 'bg-slate-200 text-slate-700'
+                        : 'bg-amber-200 text-amber-900'}`}>
+                    {d.level === 'strong' ? '确凿·信用代码一致'
+                      : d.level === 'possible' ? '近似·名称相近'
+                        : '疑似·名称一致'}
                   </span>
                   {d.status === STATUS_BLACKLISTED && (
                     <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">🚫 黑名单</span>

@@ -175,7 +175,7 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
               onChange={(e) => setSkipDuplicates(e.target.checked)}
             />
             <span>
-              <b>跳过重复供应商</b>：按统一社会信用代码（确凿）/ 公司名（疑似）比对库中已有供应商
+              <b>跳过重复供应商</b>：按统一社会信用代码（确凿）/ 公司名（疑似）比对命中则跳过该行；名称相近（近似：简称全称、同音字、一字之差，同省才提示）置信度低，<b>仅警告不跳过</b>
               （含黑名单、归档）以及本批次前面的行；命中的行不导入。取消勾选则仍导入，仅在结果中警告。
             </span>
           </label>
@@ -231,6 +231,8 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
                       <td className="px-3 py-1.5">
                         {d.matches[0]?.level === 'strong' ? (
                           <span className="text-red-600">确凿（信用代码）</span>
+                        ) : d.matches[0]?.level === 'possible' ? (
+                          <span className="text-slate-500">近似（名称相近）</span>
                         ) : (
                           <span className="text-amber-700">疑似（同名）</span>
                         )}

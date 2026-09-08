@@ -323,10 +323,18 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                         <span className="truncate text-sm font-medium text-slate-800">{m.name}</span>
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs ${
-                            m.level === 'strong' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
+                            m.level === 'strong'
+                              ? 'bg-red-50 text-red-700'
+                              : m.level === 'possible'
+                                ? 'bg-slate-100 text-slate-600'
+                                : 'bg-amber-50 text-amber-700'
                           }`}
                         >
-                          {m.level === 'strong' ? '确凿·信用代码一致' : '疑似·同名'}
+                          {m.level === 'strong'
+                            ? '确凿·信用代码一致'
+                            : m.level === 'possible'
+                              ? '近似·名称相近'
+                              : '疑似·同名'}
                         </span>
                         {m.status === STATUS_BLACKLISTED && (
                           <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">🚫 黑名单</span>

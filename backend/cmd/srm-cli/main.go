@@ -131,7 +131,8 @@ Usage:
                                  列入黑名单（淘汰/禁用，仍可搜到但醒目标记）
   srm-cli unblacklist <id>       移出黑名单，恢复在库
   srm-cli duplicates --name 名称 [--credit-code 代码] [--province 省] [--city 市]
-                                 录入去重：按信用代码(强)/公司名(疑似)查重，含黑名单/归档
+                                 录入去重：按信用代码(确凿)/公司名(疑似)/名称相近(近似，
+                                 简称全称、同音字、一字之差；同省才提示)查重，含黑名单/归档
   srm-cli merge <保留id> <并入并归档id>
                                  合并重复供应商：保留前者（身份/基本信息），并入后者的
                                  绩效/附件/资质/品类/产品线/自定义字段后归档后者；含黑名单拒绝
@@ -1148,9 +1149,12 @@ func cmdDuplicates(args []string) error {
 	}
 	rows := [][]string{{"强度", "状态", "供应商", "地域", "原因"}}
 	for _, m := range rep.Matches {
-		level := "疑似"
-		if m.Level == "strong" {
+		level := "近似"
+		switch m.Level {
+		case "strong":
 			level = "确凿"
+		case "probable":
+			level = "疑似"
 		}
 		rows = append(rows, []string{
 			level,

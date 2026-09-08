@@ -39,7 +39,7 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 | `search_suppliers` | 中文全文/拼音/同义词搜索 + 多维筛选；`q` 留空即列出首页 | `q, province, city, category, min_qual_level, min_rating, include_archived, limit` |
 | `get_supplier` | 读取完整文档式档案（基本信息/资质/品类/产品/绩效/风险/自定义字段/附件/变更记录） | `id` |
 | `add_supplier` | 录入供应商（必填 `company_name, province, city`）；录入前自动查重，命中会在结果中给出重复警告（不阻断） | 见工具 schema |
-| `find_duplicates` | 录入前查重：按信用代码(确凿)/公司名(疑似)找可能重复的供应商（含黑名单/归档）；建议 add 前先调用 | `name?`, `credit_code?`, `province?`, `city?` |
+| `find_duplicates` | 录入前查重：按信用代码(确凿)/公司名(疑似)/名称相近(近似：简称全称包含、同拼音、一字之差，同省才提示)找可能重复的供应商（含黑名单/归档）；建议 add 前先调用。`possible` 仅低置信度参考，不得当作同一主体处置 | `name?`, `credit_code?`, `province?`, `city?` |
 | `shell_risk_queue` | 待人工审核的空壳风险供应商队列（含逐条信号） | — |
 | `supplier_risk` | 某供应商的空壳检测逐条信号（规则代码 + 中文解释） | `id` |
 | `expiring_qualifications` | 资质到期提醒（已过期 / 90/30/7 天窗口），按紧迫度排序 | `within`（默认 90） |

@@ -117,7 +117,7 @@ func toolDefs() []map[string]any {
 		},
 		{
 			"name":        "find_duplicates",
-			"description": "录入前查重（去重）：按统一社会信用代码(确凿)或规范化公司名(疑似)在库中查找可能重复的供应商，含黑名单/归档记录。add_supplier 之前建议先调用；若命中黑名单尤其要警告用户不要重复合作。纯本地规则。",
+			"description": "录入前查重（去重）：按统一社会信用代码(确凿)、规范化公司名(疑似)或名称相近(近似：简称/全称包含、同拼音、一字之差；近似仅同省提示，置信度低)在库中查找可能重复的供应商，含黑名单/归档记录。add_supplier 之前建议先调用；若命中黑名单尤其要警告用户不要重复合作。纯本地规则，不阻断录入。",
 			"inputSchema": schema(map[string]any{
 				"name":        strProp("公司名称（与 credit_code 至少填一个）"),
 				"credit_code": strProp("统一社会信用代码（18 位）"),

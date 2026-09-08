@@ -219,9 +219,9 @@ func (s *Server) toolFindDuplicates(ctx context.Context, args json.RawMessage) (
 		return "", err
 	}
 	if len(dups) == 0 {
-		return "未发现可能重复的供应商（按信用代码/公司名均无匹配，含黑名单/归档）。", nil
+		return "未发现可能重复的供应商（按信用代码/公司名/名称相近均无匹配，含黑名单/归档）。", nil
 	}
-	return fmt.Sprintf("发现 %d 家可能重复的供应商（确凿=信用代码一致；疑似=公司名一致；含黑名单/归档记录）：\n%s",
+	return fmt.Sprintf("发现 %d 家可能重复的供应商（确凿=信用代码一致；疑似=公司名一致；近似=名称相近：简称/全称、同音字或一字之差，同省才提示，仅供人工判断）。含黑名单/归档记录：\n%s",
 		len(dups), pretty(dups)), nil
 }
 
