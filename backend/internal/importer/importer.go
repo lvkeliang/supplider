@@ -7,11 +7,11 @@
 //
 //  1. Template()   — download a pre-headered .xlsx template.
 //  2. Inspect()    — upload a file; get headers + sample rows + a suggested
-//                    column→field mapping (matched by Chinese header aliases;
-//                    unrecognized columns default to custom_fields).
+//     column→field mapping (matched by Chinese header aliases;
+//     unrecognized columns default to custom_fields).
 //  3. Build()      — apply the (possibly user-edited) mapping to every row,
-//                    producing supplier.ImportItem values; empty rows are
-//                    skipped and validation happens in the service layer.
+//     producing supplier.ImportItem values; empty rows are
+//     skipped and validation happens in the service layer.
 //
 // 文档式存储: columns that map to no fixed field are kept as free-form
 // custom_fields (header = field name), so industry-specific columns
@@ -64,7 +64,9 @@ var fields = []fieldSpec{
 	{Key: "contact_phone", Label: "联系电话", Aliases: []string{"联系电话", "电话", "手机号", "联系方式"}},
 	{Key: "contact_email", Label: "联系邮箱", Aliases: []string{"联系邮箱", "邮箱", "电子邮箱"}},
 	{Key: "address", Label: "详细地址", Aliases: []string{"详细地址", "地址", "注册地址"}},
+	{Key: "website", Label: "网址", Aliases: []string{"网址", "官网", "网站", "公司网址"}},
 	{Key: "categories", Label: "品类", Aliases: []string{"品类", "品类标签", "分类", "类别", "经营品类"}},
+	{Key: "products", Label: "主营产品", Aliases: []string{"主营产品", "产品线", "主营", "主营产品/服务", "经营范围产品", "供应产品"}},
 	{Key: "qual_type", Label: "资质类型", Aliases: []string{"资质类型", "资质名称", "资质"}},
 	{Key: "qual_level", Label: "资质等级", Aliases: []string{"资质等级", "资质级别"}},
 	{Key: "score", Label: "综合评分", Aliases: []string{"综合评分", "评分", "总分", "合作评分", "评价分数"}},
@@ -110,11 +112,11 @@ type Defaults struct {
 
 // Inspection is the preview result (no writes).
 type Inspection struct {
-	Headers       []string      `json:"headers"`
-	Sample        [][]string    `json:"sample"`
+	Headers       []string       `json:"headers"`
+	Sample        [][]string     `json:"sample"`
 	Suggested     map[int]string `json:"suggested"` // column index → field key
-	Fields        []FieldOption `json:"fields"`
-	TotalDataRows int           `json:"total_data_rows"`
+	Fields        []FieldOption  `json:"fields"`
+	TotalDataRows int            `json:"total_data_rows"`
 }
 
 var splitList = regexp.MustCompile(`[,，、/;；|]+`)
@@ -158,6 +160,7 @@ func Template() ([]byte, error) {
 	example := map[string]string{
 		"company_name": "杭州示例建设有限公司", "province": "浙江", "city": "杭州",
 		"district": "西湖区", "legal_person": "张三", "categories": "施工服务,市政工程",
+		"products": "土建施工,道路工程", "website": "www.example.com",
 		"qual_type": "建筑工程施工总承包", "qual_level": "二级",
 		"score": "4.5", "feedback": "合作顺利，按时交付",
 	}
@@ -177,7 +180,7 @@ func Template() ([]byte, error) {
 			templateNote,
 			"第一行为表头，请勿修改；第二行为示例，导入前请删除或覆盖。",
 			"未在表头中列出的列会作为该供应商的自定义字段保留（如 垫资能力、品牌、设备）。",
-			"资质等级支持：特级/一级/二级/三级；品类多个时用逗号分隔。",
+			"资质等级支持：特级/一级/二级/三级；品类、主营产品多个时用逗号分隔。",
 			"绩效评分（综合/交付/质量/配合度）取值 0–5，可只填综合分或只填三维（系统按均值计入评分）；每行记一条合作评价。",
 		} {
 			c, _ := excelize.CoordinatesToCellName(1, i+2)
@@ -401,8 +404,12 @@ func applyField(in *supplier.CreateInput, qualType, qualLevel *string, key, val 
 		b.ContactEmail = val
 	case "address":
 		b.Address = val
+	case "website":
+		b.Website = val
 	case "categories":
 		in.Categories = splitCategories(val)
+	case "products":
+		in.Products = splitProducts(val)
 	case "qual_type":
 		*qualType = val
 	case "qual_level":
@@ -416,6 +423,19 @@ func splitCategories(val string) []string {
 	for _, p := range parts {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitProducts parses a 主营产品 cell (comma/、/;/| separated) into
+// product-line records, the same list semantics as categories.
+func splitProducts(val string) []domain.ProductService {
+	parts := splitList.Split(val, -1)
+	out := make([]domain.ProductService, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, domain.ProductService{Name: p})
 		}
 	}
 	return out
