@@ -247,6 +247,23 @@ export interface VisibilityPolicySaveResponse {
   report: VisibilityEnforceReport
 }
 
+// ---- Backup & restore (数据备份与迁移) ----
+
+/** Manifest embedded in a backup zip (GET /api/v1/backup). */
+export interface BackupManifest {
+  format: string
+  version: number
+  created_at: string
+  attachment_count: number
+}
+
+/** Staged-restore state (POST/GET/DELETE /api/v1/backup/restore). */
+export interface RestoreStatus {
+  staged: boolean
+  manifest?: BackupManifest
+  hint?: string
+}
+
 // ---- Local-supplier preference (本地供应商偏好) ----
 
 /** Home region used for local-first ranking of lists/search. */

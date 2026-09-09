@@ -57,6 +57,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/supplider/supplider/backend/internal/backup"
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
 	"github.com/supplider/supplider/backend/internal/exporter"
@@ -77,11 +78,22 @@ type Server struct {
 	// attachments); nil disables GET /api/v1/backup (501) — e.g. the
 	// in-memory dev build has nothing on disk to back up.
 	Backup BackupFunc
-	Mux    *http.ServeMux
+	// Restore wires in-app restore/migration (staged zip, swapped in at
+	// next process start); nil answers 501 on /api/v1/backup/restore.
+	Restore *RestoreFuncs
+	Mux     *http.ServeMux
 }
 
 // BackupFunc streams one backup archive to w (see internal/backup).
 type BackupFunc func(ctx context.Context, w io.Writer) error
+
+// RestoreFuncs are the filesystem-side restore operations, bound by the
+// wiring layer (data directory + adapter snapshot checker).
+type RestoreFuncs struct {
+	Stage   func(r io.Reader) (backup.Manifest, error)
+	Pending func() (backup.Manifest, bool, error)
+	Cancel  func() error
+}
 
 // New wires routes and returns the server.
 func New(svc *supplier.Service, feats featureflag.Features) *Server {
@@ -102,6 +114,14 @@ func (s *Server) WithObjects(store objectstore.Store) *Server {
 // (the endpoint answers 501).
 func (s *Server) WithBackup(fn BackupFunc) *Server {
 	s.Backup = fn
+	return s
+}
+
+// WithRestore wires the staged in-app restore endpoints and returns the
+// server for chaining. Pass nil (the default) to answer 501 — the ephemeral
+// in-memory build has no persistent data directory to restore into.
+func (s *Server) WithRestore(fns *RestoreFuncs) *Server {
+	s.Restore = fns
 	return s
 }
 
@@ -131,6 +151,9 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /api/v1/export", s.handleExport)
 	s.Mux.HandleFunc("GET /api/v1/reminders/expiring", s.handleExpiringReminders)
 	s.Mux.HandleFunc("GET /api/v1/backup", s.handleBackup)
+	s.Mux.HandleFunc("GET /api/v1/backup/restore", s.handleRestoreStatus)
+	s.Mux.HandleFunc("POST /api/v1/backup/restore", s.handleRestoreStage)
+	s.Mux.HandleFunc("DELETE /api/v1/backup/restore", s.handleRestoreCancel)
 	s.Mux.HandleFunc("GET /api/v1/visibility/policy", s.handleGetVisibilityPolicy)
 	s.Mux.HandleFunc("PUT /api/v1/visibility/policy", s.handleSaveVisibilityPolicy)
 	s.Mux.HandleFunc("POST /api/v1/visibility/policy", s.handleSaveVisibilityPolicy)
@@ -1256,6 +1279,89 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 		// Only effective if no archive bytes were written yet.
 		writeError(w, http.StatusInternalServerError, "backup failed")
 	}
+}
+
+// restoreStatusResponse describes a staged restore to the UI.
+type restoreStatusResponse struct {
+	Staged   bool             `json:"staged"`
+	Manifest *backup.Manifest `json:"manifest,omitempty"`
+	Hint     string           `json:"hint,omitempty"`
+}
+
+// handleRestoreStatus reports whether a validated restore is waiting for
+// the next application restart.
+func (s *Server) handleRestoreStatus(w http.ResponseWriter, r *http.Request) {
+	if s.Restore == nil {
+		writeError(w, http.StatusNotImplemented, "restore is not available (no on-disk data directory)")
+		return
+	}
+	m, staged, err := s.Restore.Pending()
+	if err != nil {
+		log.Printf("httpapi: restore pending: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not read pending restore")
+		return
+	}
+	if !staged {
+		writeJSON(w, http.StatusOK, restoreStatusResponse{Staged: false})
+		return
+	}
+	writeJSON(w, http.StatusOK, restoreStatusResponse{
+		Staged:   true,
+		Manifest: &m,
+		Hint:     "恢复包已校验暂存：完全退出并重新打开应用后生效（当前数据库会先保留为 restore.rollback-* 以便回退）",
+	})
+}
+
+// handleRestoreStage accepts a backup zip (raw application/zip body or a
+// multipart "file" field), validates it and stages it for the next restart.
+// Nothing live is replaced until then; the current library is preserved in
+// a rollback directory at apply time.
+func (s *Server) handleRestoreStage(w http.ResponseWriter, r *http.Request) {
+	if s.Restore == nil {
+		writeError(w, http.StatusNotImplemented, "restore is not available (no on-disk data directory)")
+		return
+	}
+	// 256 MiB cap (attachments are ≤50MB each; personal libraries are small).
+	r.Body = http.MaxBytesReader(w, r.Body, 256<<20)
+	body := r.Body
+	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "multipart/") {
+		if err := r.ParseMultipartForm(256 << 20); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid multipart upload: "+err.Error())
+			return
+		}
+		f, _, err := r.FormFile("file")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, `multipart restore requires a "file" field`)
+			return
+		}
+		defer f.Close()
+		body = f
+	}
+	manifest, err := s.Restore.Stage(body)
+	if err != nil {
+		// Every Stage failure is a bad/unusable archive — never 500.
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, restoreStatusResponse{
+		Staged:   true,
+		Manifest: &manifest,
+		Hint:     "恢复包已通过完整性校验并暂存。请完全退出应用后重新打开，数据将在启动时恢复（当前数据自动保留一份回退副本）。",
+	})
+}
+
+// handleRestoreCancel discards a staged restore.
+func (s *Server) handleRestoreCancel(w http.ResponseWriter, r *http.Request) {
+	if s.Restore == nil {
+		writeError(w, http.StatusNotImplemented, "restore is not available (no on-disk data directory)")
+		return
+	}
+	if err := s.Restore.Cancel(); err != nil {
+		log.Printf("httpapi: restore cancel: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not cancel pending restore")
+		return
+	}
+	writeJSON(w, http.StatusOK, restoreStatusResponse{Staged: false})
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {

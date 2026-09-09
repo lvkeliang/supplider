@@ -34,6 +34,55 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：应用内一键恢复/换机迁移（备份闭环收尾）——停应用解压覆盖不再是唯一路径
+
+备份导出早已落地，但恢复只能"停应用、手动解压覆盖数据目录"，普通桌面用户做不到。
+本环补齐**应用内恢复**：设置页/CLI 上传备份 zip → 服务端校验并**暂存** → 下次进程启动
+（打开任何数据库连接**之前**）原子换入；现有库先整体挪进时间戳回退目录，坏恢复可救回。
+纯本地、无外部依赖。**绝不替换正在打开的活库**。
+
+- **暂存-重启-生效**（`internal/backup/restore.go`，驱动无关）：
+  - `Stage(r,dataDir,check)`：上传体先落临时文件（zip 中央目录要 ReaderAt，也避免整包进内存），
+    解压到同级临时目录（同文件系统→rename 原子）。校验链：合法 zip → 条目白名单
+    （仅 `supplider.db`/`manifest.json`/`attachments/**`，`safeExtractPath` 挡
+    **zip-slip 穿越**与绝对路径）→ 拒非普通文件（symlink/设备）→ 单文件/总量 2GiB、
+    10 万条目（**zip-bomb** 闸）→ manifest format/version 匹配 → 适配器 `check` 过库。
+    通过后替换旧 staging（旧的先 rename 走再删，rename 不能覆盖非空目录）；任何失败
+    删除 work dir，活数据零触碰。
+  - `ApplyPendingRestore(dataDir)`：**只在 main 开 store 前调用**。先把
+    `-wal/-shm/db/attachments` 依次挪入 `restore.rollback-<UTC时间戳>`（WAL 必须先挪，
+    绝不能残留在恢复后的库里），再把暂存 db/attachments rename 到位；失败按逆序回滚已挪
+    文件并报错（接线层 `log.Fatal`——拒绝在半交换的树上开库）。`pruneRollbacks` 只留
+    最新一份回退，反复恢复不撑爆磁盘。附件目录是**整体替换不是合并**（备份后新增的文件
+    随其库一起消失，db 引用与磁盘始终一致）。
+  - `PendingRestore` / `CancelRestore`（幂等）。
+- **适配器校验**（`sqlite/check.go` `CheckSnapshot`，放在适配器包——backup 包不碰驱动）：
+  `mode=ro` + `query_only` 只读打开候选文件（**不产生 WAL/SHM 副作用**），跑
+  `PRAGMA integrity_check`，并要求存在 `suppliers` 表——任意健康的外来 .db 也不接受。
+- **接线**：
+  - build tag 分文件：`cmd/suppliderd/restore_personal.go`（personal：注入 sqlite.CheckSnapshot
+    + boot apply）/ `restore_other.go`（!personal：nil funcs，端点 501；MongoDB 版另做归档路径）。
+    `main.go` 在 `storefactory.Open` **之前**调 `applyPendingRestore`。
+  - HTTP：`GET/POST/DELETE /api/v1/backup/restore`（状态/暂存/取消）。POST 收 raw
+    `application/zip` 或 multipart `file`，`MaxBytesReader` 256MiB；Stage 任何失败一律 **400**
+    （坏包/坏库，绝不是 500），成功 202 + manifest。nil Restore（内存开发构建）三方法全 **501**。
+  - CLI：`srm-cli restore <备份.zip>`（暂存并提示完全退出再打开）、`srm-cli restore-cancel`。
+  - 前端：设置页"数据备份与迁移"卡片加⬆上传（拖拽不可见 input）、暂存中琥珀横幅（备份时间/
+    附件数/重启提示/取消按钮）、校验失败红条（明示未改任何数据）；换机迁移指引更新。
+- 测试：`backup/restore_test.go` 4 例（暂存-换入-回滚全流程 + 旧附件被替换/新附件到位/
+  WAL 不残留/恰一份 rollback；重复暂存最新者胜 + cancel；坏包/zip-slip/format/version/
+  checker 拒绝；空 dataDir/nil checker）；`sqlite/check_test.go` 1 例（健康快照只读通过且
+  不生 WAL、垃圾字节失败、健康但无 suppliers 表的外来库被拒）。全量默认+personal 绿，
+  三 tag 编译，gofmt/vet 净，前端 tsc+vite 通过。
+- E2E（personal/SQLite，真实 HTTP+CLI+多次重启）：建 A → 备份 → 建 B → 传垃圾 400 且
+  未暂存 → 传真包 **202**（暂存期活库仍 2 家、staging 落盘 0600）→ 重启日志
+  `restored library from backup created … previous library kept in a restore.rollback-*` →
+  **只剩 A（列表与 FTS 均无 B）**、staging 已消费、rollback 目录生成；把 rollback 的 db 用
+  **另一个 sidecar 实跑确认是健康的 2 家库**（回退可用）；CLI restore/restore-cancel 正确；
+  python 造的"健康但无 suppliers 表"的 sqlite 经真实端点 → 400 `not a Supplider backup`；
+  附件链路：A 备份前传 license → 备份 → 备份后建 C 并传文件 → 恢复重启 → A 附件**字节一致**
+  可下载、C 与其文件双双消失（替换非合并）；默认内存构建 restore 三方法 + /backup 均 501。
+
 ### 2026-09-09：录入去重增加低置信度"近似"档（简称/同音字/笔误）——核心痛点①增强
 
 原录入去重只有两档：信用代码一致=确凿、规范化名称完全一致=疑似。真实场景最常见的

@@ -34,6 +34,10 @@ func main() {
 
 	log.Printf("suppliderd starting: tier=%s addr=%s data-dir=%q", tier.Current(), *addr, *dataDir)
 
+	// Staged restore (应用内恢复/迁移) must complete BEFORE any DB handle
+	// exists — it replaces supplider.db and attachments on disk.
+	applyPendingRestore(*dataDir)
+
 	store, err := storefactory.Open(storefactory.Config{DataDir: *dataDir})
 	if err != nil {
 		log.Fatalf("open store: %v", err)
@@ -56,6 +60,7 @@ func main() {
 	apiServer := httpapi.New(svc, feats).
 		WithObjects(objects).
 		WithBackup(backupWriter(store, objects)).
+		WithRestore(restoreFuncs(*dataDir)).
 		MountWebUI(webui.Dist())
 	handler := httpapi.CORS(apiServer.Mux)
 

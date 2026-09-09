@@ -11,6 +11,7 @@ import type {
   LocalPreference,
   MergeResult,
   Page,
+  RestoreStatus,
   RiskReport,
   ShellRiskReport,
   Supplier,
@@ -253,6 +254,25 @@ export const api = {
     request<LocalPreference>('PUT', '/api/v1/preferences/local', { province, city }),
   clearLocalPreference: () =>
     request<LocalPreference>('PUT', '/api/v1/preferences/local?clear=1'),
+
+  // In-app restore/migration: validate and stage a backup zip; the swap
+  // takes effect at the next application restart (current data is kept in
+  // a restore.rollback-* directory). 202 Accepted carries the manifest.
+  getRestoreStatus: () =>
+    request<RestoreStatus>('GET', '/api/v1/backup/restore'),
+  uploadRestore: async (file: File): Promise<RestoreStatus> => {
+    const res = await fetch(BASE + '/api/v1/backup/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/zip' },
+      body: file,
+    })
+    const text = await res.text()
+    const data = text ? JSON.parse(text) : undefined
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
+    return data as RestoreStatus
+  },
+  cancelRestore: () =>
+    request<RestoreStatus>('DELETE', '/api/v1/backup/restore'),
 
   // Upload an attachment (multipart). Returns the updated supplier document.
   // The hard limit is 50MB (enforced server-side; 413 on overflow).

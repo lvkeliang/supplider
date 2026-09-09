@@ -3,7 +3,12 @@ import { api, apiUrl } from '../api'
 import { DocumentCard } from './Card'
 import type { Go } from '../App'
 import { VIS_LABELS } from '../types'
-import type { LocalPreference, VisibilityPolicyResponse, VisibilityPolicySaveResponse } from '../types'
+import type {
+  LocalPreference,
+  RestoreStatus,
+  VisibilityPolicyResponse,
+  VisibilityPolicySaveResponse,
+} from '../types'
 
 // SettingsView is the admin console seed surface. For the personal MVP it
 // holds one policy: the visibility cap (可见性策略收紧). Tightening it runs
@@ -125,18 +130,114 @@ export function SettingsView({ go }: { go: Go }) {
 
       <LocalPreferenceCard />
 
-      <DocumentCard title="数据备份与迁移" defaultOpen>
-        <p className="mb-3 text-sm text-slate-500">
-          一次下载完整库备份（<b>.zip</b>）：数据库一致性快照 + 全部附件文件，应用运行中也可安全导出。
-          建议定期复制到网盘/移动硬盘。恢复/迁移：<b>关闭应用</b>，把备份解压覆盖应用数据目录
-          （<code className="rounded bg-slate-100 px-1">com.supplider.desktop</code>，
-          Windows 在 %APPDATA%、macOS 在 ~/Library/Application Support、Linux 在 ~/.local/share 下）后重新打开即可。
-        </p>
+      <BackupRestoreCard />
+    </div>
+  )
+}
+
+/**
+ * BackupRestoreCard: download the full-library zip, and restore/migrate via
+ * upload. A chosen backup is validated (manifest + SQLite integrity) and
+ * STAGED, then applied at the next app start — the live database is never
+ * overwritten while open. The previous library is kept as a rollback copy.
+ */
+function BackupRestoreCard() {
+  const [status, setStatus] = useState<RestoreStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [note, setNote] = useState('')
+
+  const refresh = () =>
+    api
+      .getRestoreStatus()
+      .then(setStatus)
+      .catch(() => {}) // 501 on ephemeral builds: card still offers download
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  const upload = async (file: File) => {
+    setBusy(true)
+    setError('')
+    setNote('')
+    try {
+      const st = await api.uploadRestore(file)
+      setStatus(st)
+      setNote('校验通过，恢复包已暂存。请完全退出并重新打开应用，数据将在启动时恢复。')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancel = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      setStatus(await api.cancelRestore())
+      setNote('已取消暂存的恢复包，数据保持不变。')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <DocumentCard title="数据备份与迁移" defaultOpen>
+      <p className="mb-3 text-sm text-slate-500">
+        一次下载完整库备份（<b>.zip</b>）：数据库一致性快照 + 全部附件文件，应用运行中也可安全导出。
+        建议定期复制到网盘/移动硬盘。<b>换机迁移/恢复</b>：在新机器安装并打开一次应用后，
+        在下方选择备份 zip 上传，校验通过后<b>完全退出并重新打开应用</b>即可；恢复前的现有数据会自动保留一份
+        <code className="rounded bg-slate-100 px-1">restore.rollback-*</code> 回退副本。
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
         <a className="btn-ghost inline-block" href={apiUrl('/api/v1/backup')} download>
           ⬇ 下载数据备份（.zip）
         </a>
-      </DocumentCard>
-    </div>
+        <label className="btn-ghost inline-block cursor-pointer">
+          ⬆ 上传备份并恢复
+          <input
+            type="file"
+            accept=".zip,application/zip"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) void upload(f)
+              e.target.value = ''
+            }}
+          />
+        </label>
+      </div>
+
+      {status?.staged && status.manifest && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <div className="font-medium">
+            ⏳ 已暂存恢复包（备份时间 {new Date(status.manifest.created_at).toLocaleString()}，
+            附件 {status.manifest.attachment_count} 个）
+          </div>
+          <div className="mt-1">
+            {status.hint ?? '完全退出并重新打开应用后生效。'}
+          </div>
+          <button className="btn-ghost mt-2 !py-1 text-xs" disabled={busy} onClick={cancel}>
+            取消本次恢复
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          恢复包校验失败，未改动任何数据：{error}
+        </div>
+      )}
+      {note && !error && !status?.staged && (
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {note}
+        </div>
+      )}
+    </DocumentCard>
   )
 }
 

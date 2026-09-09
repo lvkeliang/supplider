@@ -70,6 +70,10 @@ func main() {
 		err = cmdExport(args)
 	case "backup":
 		err = cmdBackup(args)
+	case "restore":
+		err = cmdRestore(args)
+	case "restore-cancel":
+		err = cmdRestoreCancel(args)
 	case "compare":
 		err = cmdCompare(args)
 	case "expiring":
@@ -117,7 +121,9 @@ Usage:
   srm-cli search <keyword> [filters]
   srm-cli info <id> [--json]
   srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
-  srm-cli backup [--out file.zip]   下载完整数据备份（数据库快照+全部附件 zip；恢复=停应用后解压覆盖数据目录）
+  srm-cli backup [--out file.zip]   下载完整数据备份（数据库快照+全部附件 zip）
+  srm-cli restore <备份.zip>        校验并暂存恢复包，完全退出并重启应用后生效（当前数据自动保留回退副本）
+  srm-cli restore-cancel            取消已暂存、尚未生效的恢复包
   srm-cli compare <id> <id>... [--criteria price,delivery,qual]
   srm-cli expiring [--within N] [--json]
                                  资质到期提醒：列出已过期/7 天内/30 天内/90 天内到期的资质
@@ -619,7 +625,70 @@ func cmdBackup(args []string) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "backup written: %s (%d bytes). Restore: stop the app, unzip over the data directory, restart.\n", path, n)
+	fmt.Fprintf(os.Stderr, "backup written: %s (%d bytes).\n", path, n)
+	return nil
+}
+
+// cmdRestore uploads a backup zip for staged in-app restore (应用内恢复).
+// The sidecar validates and stages it; the swap happens at next process
+// start, so the printed instruction is to fully quit and reopen the app.
+func cmdRestore(args []string) error {
+	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: srm-cli restore <备份.zip>")
+	}
+	f, err := os.Open(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	req, err := http.NewRequest(http.MethodPost, apiBase()+"/api/v1/backup/restore", f)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/zip")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		return decodeAPIError(resp)
+	}
+	var st struct {
+		Staged   bool `json:"staged"`
+		Manifest struct {
+			CreatedAt     time.Time `json:"created_at"`
+			AttachmentCnt int       `json:"attachment_count"`
+		} `json:"manifest"`
+		Hint string `json:"hint"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return err
+	}
+	fmt.Printf("恢复包已暂存（备份时间 %s，附件 %d 个）。\n",
+		st.Manifest.CreatedAt.Format("2006-01-02 15:04"), st.Manifest.AttachmentCnt)
+	fmt.Fprintln(os.Stderr, "请完全退出并重新打开应用（或重启 suppliderd），数据将在启动时恢复；")
+	fmt.Fprintln(os.Stderr, "当前数据库会保留为 restore.rollback-* 回退副本。")
+	return nil
+}
+
+// cmdRestoreCancel discards a staged restore.
+func cmdRestoreCancel(_ []string) error {
+	req, _ := http.NewRequest(http.MethodDelete, apiBase()+"/api/v1/backup/restore", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	fmt.Println("已取消暂存的恢复包。")
 	return nil
 }
 
