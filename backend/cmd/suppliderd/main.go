@@ -98,15 +98,23 @@ func main() {
 	defer stop()
 	apiServer.StartMaintenanceLoops(ctx)
 
+	// Serve on the listener acquired at startup (single-instance gate). A
+	// Serve failure after bind must NOT call log.Fatalf: os.Exit skips the
+	// deferred store.Close(), risking an un-checkpointed SQLite WAL. Relay
+	// it to the main goroutine so the clean-shutdown path runs instead.
+	serveErr := make(chan error, 1)
 	go func() {
-		// Serve on the listener acquired at startup (single-instance gate).
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("http server: %v", err)
+			serveErr <- err
 		}
 	}()
 	log.Printf("suppliderd ready on http://%s", *addr)
 
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+	case err := <-serveErr:
+		log.Printf("http server stopped serving: %v", err)
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

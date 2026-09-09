@@ -46,6 +46,10 @@ linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M 
 
 **唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。侧侧器 Rust 仅在 release tag 的 CI runner 编译（本机无 Rust 工具链，见记忆 sidecar-supervision-and-ci），改动后需专门一轮加 `cargo check` 到 CI。
 
+### 2026-09-09：sidecar HTTP 服务失败改为优雅退出，不再跳过 store.Close
+
+启动序列审计发现一个边缘退出缺陷：serve goroutine 里 `srv.Serve(ln)` 在监听器已接管后若返回错误（listener 运行期失效等），旧代码 `log.Fatalf` 直接 `os.Exit(1)`，**绕过所有 defer**——包括 `store.Close()`，SQLite WAL 可能未 checkpoint、优雅 Shutdown 也不执行。修复：改为缓冲 `serveErr chan error`（cap 1，goroutine 永不阻塞），主循环 `select { <-ctx.Done() / <-serveErr }` 后统一走 `srv.Shutdown`（Serve 已返回时为 no-op）与 `defer store.Close()`；仅记录日志、退出码仍为非零语义（进程结束），但资源清理完整。SIGTERM 真机验证：readyz 正常，收信号后打印 "suppliderd stopped"，数据目录只留 supplider.db（无 -wal/-shm），干净关闭。listen/open-store/open-objects 的启动前 Fatalf 保留（此时无资源需要回滚）。Go 双 tag 全量绿、三 tier 编译、gofmt/vet 净。
+
 ## 已完成
 
 ### 2026-09-09：FTS5 关键词健壮性审计——病态输入不报错，固化引号转义回归测试
