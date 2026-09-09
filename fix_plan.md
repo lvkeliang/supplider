@@ -68,6 +68,46 @@ tauri-build 2 的 build.rs 无条件按当前 target triple 拷贝 externalBin s
 
 ## 已完成
 
+### 2026-09-10：sidecar 监督进程——中途崩溃自动 respawn，不必再双击应用；SIGTERM/SIGINT 也能干净收子进程
+
+承接前两轮的后挂（"sidecar 中途消失后必须再双击一次"，此前因无本机 Rust 工具链搁置），
+本轮在 Tauri shell 内实现 sidecar 监督，全部经真机 E2E 验证（DISPLAY :0 起真实 GUI +
+真实 Go sidecar，11 个断言全过）。`src-tauri/src/main.rs` 重构：
+
+- **监督线程 `supervise`**：拥有每一代 sidecar 的事件 Receiver。收到非预期的
+  `CommandEvent::Terminated` 时：1s backoff 后用同一 AppHandle/data_dir 重新
+  spawn（`spawn_sidecar` 抽出），新 CommandChild 换入共享 `Arc<SidecarInner>`，
+  stdout/stderr 转发与就绪探针各自重新挂接。前端 5s 心跳断线门继续作为兜底层
+  （give-up 后提示重启），双层防线。
+- **崩溃环闸门**：连续短命代（存活 <10s）计数，第 5 次即放弃 respawn（日志明示
+  "giving up — restart the app"），避免坏 sidecar 无限热转；存活 ≥10s 计数清零。
+- **单实例交接识别**：退出码 0 且 `/readyz` 仍有健康应答（另一个应用实例占着
+  7612，即 Go 侧 instance.go 让位场景）→ 不抢端口、不 respawn，supervisor 收工；
+  UI 由既有实例继续服务。
+- **关闭竞态收口**：`shutting_down: AtomicBool` 先于 kill 置位，supervisor 看到
+  自己制造的 Terminated 不再 respawn；backoff 睡眠后、以及"respawn 已生成但退出
+  事件同时到达"两个窗口都复查标志并就地 kill 新生孤儿。
+- **SIGTERM/SIGINT 处理（新增）**：tauri/tao 均不处理 SIGTERM（查 2.11.5/tao 源码
+  确认），任务管理器结束/注销会话走默认动作会绕过 ExitRequested 留下孤儿 daemon。
+  main 开头对全进程阻塞两信号（在 runtime 起线程前），专用线程 sigwait → 复用同一
+  `SidecarInner::shutdown()`（与窗口关闭路径共用）→ 150ms 等回收 → exit(0)。
+  libc 0.2（依赖图中已有，仅锁文件 +1 行直连边），cfg(unix) 门控，Windows no-op
+  （taskkill 走窗口关闭路径）。
+- **E2E（`scripts/shell-e2e.sh`，真机，DISPLAY :0 起真实 GUI + 真实 Go sidecar）**：
+  ① sidecar `kill -9`（日志 exit=None signal=9）→ 1s 级恢复、新 PID、readyz 重新
+  200；SIGTERM 应用后端口无监听、零孤儿；② 外部健康 daemon 占端口时启动应用 →
+  识别交接、不 respawn、应用退出不杀外部 daemon；③ 把 sidecar 换成 `exit 1` 脚本 →
+  恰好 4 次 respawn 日志（5 条短命代后 give-up），有界。trap 保证两侧路径二进制
+  （binaries/ 与 target/debug/，debug 构建从后者拉起）均还原为 ELF。
+  **2026-09-10 提交轮补记**：脚本从 /tmp 收入仓库并把 TEST 2/3 的固定 sleep 改为
+  轮询（wait_log 20s/40s）——首次提交前复跑时 TEST 3 在本机持续构建负载下 12s 只
+  观察到 3 次 respawn（debug 二进制退出事件投递被拖慢，非代码缺陷；隔离复跑周期
+  仍为 ~1s、4 次 respawn 精确 give-up），定宽窗口本身是 flaky 根源；改轮询后 11/11。
+- 验证：cargo check/fmt/clippy/test 全净（clippy 0 warning），debug 实跑；
+  Go 侧零改动，default+personal 全量测试、三 tag 编译、vet/fmt 净。
+- 设计边界：监督只管进程存活；readyz/前端数据视图重挂载仍由前端 down→online 闸门
+  负责（上一轮已落地），两层职责不重叠。
+
 ### 2026-09-10：本机 Rust 工具链首次验证——cargo check 抓到 blocking_recv API 漂移并修复，Cargo.lock 提交钉版
 
 开发机装好 rustup stable（rustc/cargo 1.98.1）+ webkit2gtk-4.1 系统依赖。按 fix_plan 本轮
@@ -91,9 +131,9 @@ tauri-build 2 的 build.rs 无条件按当前 target triple 拷贝 externalBin s
   不删史实）。
 - 验证：`cargo check` 0 错误（增量 ~1s）、`cargo test` harness 编译并跑过（0 单测）；
   Go 侧零改动，default+personal 全量与三 tag 编译按清单复验。
-- **仍后挂（现在本机可做了）**：① `cargo tauri build` 本机打 Linux 包做完整链路；②
-  sidecar 崩溃后 Rust 侧 respawn（`CommandEvent::Terminated`，旧后挂理由"本机无 Rust"已消失）；
-  ③ CI shell job 转绿的远端实证随下次 push。
+- **后挂更新**：② sidecar 崩溃后 Rust 侧 respawn **已完成**（见本章 2026-09-10
+  "sidecar 监督进程"条目，真机 E2E 验证）。① `cargo tauri build` 本机打 Linux 包完整链路
+  仍后挂；③ CI shell job 转绿的远端实证随下次 push。
 
 ### 2026-09-10：修复 shell CI job——cargo check 同样要求 sidecar 二进制（此前判断错误，job 一直红）
 
