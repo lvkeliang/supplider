@@ -100,6 +100,7 @@ jobs:
           releaseBody: 'See assets below for desktop installers and CLI/MCP tools.'
           releaseDraft: false
           prerelease: false
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
           # No @tauri-apps/cli dependency is checked into the repo (the Tauri
           # shell lives in src-tauri/), so invoke the CLI through npx. The
           # CLI auto-discovers ./src-tauri/tauri.conf.json from the repo root.
