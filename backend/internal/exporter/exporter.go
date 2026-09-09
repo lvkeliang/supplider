@@ -73,7 +73,7 @@ func JSON(docs []*domain.Supplier, now time.Time) ([]byte, error) {
 var xlsxFixedColumns = []string{
 	"公司名称", "省份", "城市", "区县", "统一社会信用代码", "法定代表人",
 	"注册资本", "成立日期", "经营范围", "供应商类型", "联系人", "联系电话",
-	"联系邮箱", "详细地址", "品类", "资质类型", "资质等级",
+	"联系邮箱", "详细地址", "网址", "品类", "主营产品", "资质类型", "资质等级",
 }
 
 // XLSX renders suppliers as a workbook: fixed columns first (identical to
@@ -174,10 +174,24 @@ func fixedCells(s *domain.Supplier) []string {
 		b.ContactPhone,
 		b.ContactEmail,
 		b.Address,
+		b.Website,
 		strings.Join(s.Categories, ","),
+		strings.Join(productNames(s.ProductsServices), ","),
 		q.Type,
 		q.Level,
 	}
+}
+
+// productNames renders the offered product/service lines as a comma-joined
+// name list (the importer splits it back into lines).
+func productNames(ps []domain.ProductService) []string {
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		if name := strings.TrimSpace(p.Name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // topQualification returns the supplier's highest-ranked qualification;

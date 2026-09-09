@@ -24,9 +24,13 @@ func sampleDocs(t *testing.T) []*domain.Supplier {
 			Owner: "u1", Visibility: domain.VisSelf,
 			BasicInfo: domain.BasicInfo{
 				CompanyName: "杭州一建有限公司", LegalPerson: "张三",
-				Region: domain.Region{Province: "浙江", City: "杭州", District: "余杭区"},
+				Website: "www.hzyijian.example",
+				Region:  domain.Region{Province: "浙江", City: "杭州", District: "余杭区"},
 			},
 			Categories: []string{"施工服务", "市政工程"},
+			Products: []domain.ProductService{
+				{Name: "土建施工"}, {Name: "道路工程"},
+			},
 			Qualifications: []domain.Qualification{
 				{Type: "建筑工程施工总承包", Level: "三级"},
 				{Type: "市政公用工程施工总承包", Level: "二级"}, // higher rank
@@ -92,6 +96,14 @@ func TestXLSXRoundTripThroughImporter(t *testing.T) {
 	}
 	if len(one.Categories) != 2 || one.Categories[0] != "施工服务" {
 		t.Errorf("categories = %v, want [施工服务 市政工程]", one.Categories)
+	}
+	// Website and product lines round-trip (regression: once omitted from
+	// the workbook, an export→re-import silently dropped them).
+	if one.BasicInfo.Website != "www.hzyijian.example" {
+		t.Errorf("website lost on round-trip: %q", one.BasicInfo.Website)
+	}
+	if len(one.Products) != 2 || one.Products[0].Name != "土建施工" || one.Products[1].Name != "道路工程" {
+		t.Errorf("products lost on round-trip: %+v", one.Products)
 	}
 	// The template has a single qualification slot: the highest-ranked one.
 	if len(one.Qualifications) != 1 || one.Qualifications[0].Level != "二级" {
