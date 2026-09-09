@@ -318,7 +318,9 @@ func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Reason string `json:"reason"`
 		}
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
+		if !decodeOptionalJSONBody(w, r, 1<<16, &body) {
+			return
+		}
 		if strings.TrimSpace(body.Reason) != "" {
 			reason = body.Reason
 		}
@@ -352,7 +354,9 @@ type mergeRequest struct {
 func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 	var req mergeRequest
 	if r.Body != nil {
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+		if !decodeOptionalJSONBody(w, r, 1<<16, &req) {
+			return
+		}
 	}
 	if strings.TrimSpace(req.DuplicateID) == "" {
 		req.DuplicateID = r.URL.Query().Get("duplicate_id")
@@ -893,7 +897,9 @@ type savePolicyRequest struct {
 func (s *Server) handleSaveVisibilityPolicy(w http.ResponseWriter, r *http.Request) {
 	var req savePolicyRequest
 	if r.Body != nil {
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+		if !decodeOptionalJSONBody(w, r, 1<<16, &req) {
+			return
+		}
 	}
 	if req.MaxLevel == nil {
 		// CLI convenience: ?max_level=N
@@ -905,7 +911,12 @@ func (s *Server) handleSaveVisibilityPolicy(w http.ResponseWriter, r *http.Reque
 	}
 	if req.BufferDays == 0 {
 		if v := r.URL.Query().Get("buffer_days"); v != "" {
-			req.BufferDays, _ = strconv.Atoi(v)
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "buffer_days must be an integer number of days")
+				return
+			}
+			req.BufferDays = n
 		}
 	}
 	if req.MaxLevel == nil {
@@ -974,7 +985,9 @@ func (s *Server) handleGetLocalPreference(w http.ResponseWriter, r *http.Request
 func (s *Server) handleSaveLocalPreference(w http.ResponseWriter, r *http.Request) {
 	var req localPreferenceRequest
 	if r.Body != nil {
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+		if !decodeOptionalJSONBody(w, r, 1<<16, &req) {
+			return
+		}
 	}
 	if v := r.URL.Query().Get("province"); v != "" {
 		req.Province = v
@@ -1148,7 +1161,9 @@ func (s *Server) handleAppealVisibility(w http.ResponseWriter, r *http.Request) 
 		var body struct {
 			Note string `json:"note"`
 		}
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
+		if !decodeOptionalJSONBody(w, r, 1<<16, &body) {
+			return
+		}
 		if strings.TrimSpace(body.Note) != "" {
 			note = body.Note
 		}
@@ -1174,7 +1189,9 @@ type resolveAppealRequest struct {
 func (s *Server) handleResolveVisibilityAppeal(w http.ResponseWriter, r *http.Request) {
 	var req resolveAppealRequest
 	if r.Body != nil {
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+		if !decodeOptionalJSONBody(w, r, 1<<16, &req) {
+			return
+		}
 	}
 	// Grant may also arrive as ?grant=true|false (CLI convenience). An
 	// explicit body field wins; otherwise the query decides.
@@ -1242,7 +1259,9 @@ func (s *Server) handleRiskReview(w http.ResponseWriter, r *http.Request) {
 	var req riskReviewRequest
 	// Body is optional — reviewers may POST with an empty body + ?outcome=.
 	if r.Body != nil {
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+		if !decodeOptionalJSONBody(w, r, 1<<16, &req) {
+			return
+		}
 	}
 	if strings.TrimSpace(req.Outcome) == "" {
 		req.Outcome = r.URL.Query().Get("outcome")
@@ -1466,6 +1485,34 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// decodeOptionalJSONBody decodes an OPTIONAL JSON request body into dst.
+//
+// These action endpoints accept either a JSON body or query parameters (CLI
+// convenience), so an EMPTY body must decode to zero values and proceed.
+// A PRESENT body that fails to decode, however, must be rejected with 400:
+// silently applying Go zero values is actively dangerous for pointer/int
+// fields — e.g. {"max_level":"x"} once persisted the strictest policy (0)
+// and triggered an enforce sweep, because the allocator zeroed *int before
+// the type error surfaced. Returns false after writing the 400 response.
+func decodeOptionalJSONBody(w http.ResponseWriter, r *http.Request, limit int64, dst any) bool {
+	if r.Body == nil {
+		return true
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return false
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return true
+	}
+	if err := json.Unmarshal(data, dst); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return false
+	}
+	return true
 }
 
 func writeServiceError(w http.ResponseWriter, err error) {

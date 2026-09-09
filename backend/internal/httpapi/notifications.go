@@ -7,7 +7,6 @@ package httpapi
 // surfaces it in the bell, fully local with no AI/network.
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -26,7 +25,9 @@ func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Watched *bool `json:"watched"`
 		}
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body)
+		if !decodeOptionalJSONBody(w, r, 1<<10, &body) {
+			return
+		}
 		if body.Watched != nil {
 			watched = *body.Watched
 		}

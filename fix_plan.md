@@ -34,6 +34,39 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：黑盒审计修复——畸形策略体不再落库最严等级（0），附件 key 含控制字符返回 400 而非 500
+
+延续"哨兵错误是否在 HTTP 边界被正确分类"的方法论，对在跑的 personal/SQLite 真机做
+第二轮畸形输入黑盒扫描（本轮重点此前少测的 watch/通知/merge/申诉/策略/偏好/附件/
+导入/恢复约 50 个用例）。绝大多数端点分类正确（merge/appeal/risk-review 空体 400、
+附件 50MB 边界 201 / 50MB+1 413、假 xlsx/坏 multipart 400、cursor/穿越 key 4xx），
+但发现两处真问题，均已修复并真机复验：
+
+- **可见性策略畸形体静默落库最严等级（最危险）**：`PUT /visibility/policy` 的 body
+  `{"max_level":"x"}` 返回 **200** 并把 `max_level=0`（0 仅自己，五级中最严）持久化、
+  **立即触发一次 enforce 处置扫描**。根因：handler `_ = Decode(...)` 吞掉解码错误，
+  而 Go 在类型报错前**已为 `*int` 分配零值**——指针非 nil，"必填"校验通过，0 又恰是
+  合法的最严等级。畸形请求因此从"无操作"变成"把全公司可见性收紧到仅自己并启动数据
+  处置"。修复：新增统一的 `decodeOptionalJSONBody`（空体容错以保留 CLI query 参数
+  路径，**有体但畸形一律 400**，超 MaxBytesReader 同样 400），替换全部 8 处
+  `_ = Decode`（policy/watch/blacklist/merge/appeal/resolve/risk-review/local-pref）；
+  `?buffer_days=非数字` 也从静默按 0 改为 400。
+- **附件 key 含控制字符 500**：`GET /attachments/a%00b` 在 localfs 路径检查全部通过
+  （NUL 不是 `..`、不越界），最终 `os.Open` 在 syscall 层 EINVAL → 500。修复：
+  `localfs.resolve` 拒绝任何 <0x20 / 0x7f 字符（NUL/CR/tab…），包装既有
+  `objectstore.ErrInvalidKey` → HTTP 400；S3 兼容存储同样禁止这些字符，未来 S3
+  适配器保留同一检查。
+- 测试：`httpapi/visibility_policy_test.go`——4 种畸形策略体均 400 且 GET 确认
+  **configured 仍为 false**（没落库）、空体+query 的 CLI 路径仍 200、6 个可选体
+  端点对坏 JSON 统一 400 而空体仍 200；`attachment_test.go` 增 NUL/CR 编码 key →400；
+  localfs 穿越测试增 `a\x00b`/`cr\r\n.txt`（Put+Get 双侧 ErrInvalidKey）。
+- 验证：default+personal 全量测试绿；三 tag 编译；gofmt/vet 净；真机复验
+  畸形策略 400 且不落库、空体 query 200、NUL key 400、格式正确无对象仍 404、
+  watch 空体 200 / 坏体 400。
+- 方法论：本轮把上轮"哨兵映射"之外的另一类输入错误——**可选 JSON 体被吞解码错误**
+  ——收敛为单一 helper；今后新增"body 或 query 二选一"端点必须复用
+  `decodeOptionalJSONBody`，不要再写 `_ = Decode`。
+
 ### 2026-09-09：运行期断线自愈——sidecar 中途崩溃/被杀后窗口不再永久报错，自动重连并重挂载业务视图
 
 启动连接闸门（见上一轮）只解决了冷启动；**online 之后 sidecar 进程消失**

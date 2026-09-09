@@ -154,6 +154,16 @@ func (s *Store) resolve(key string) (string, error) {
 	if key == "" || key == "." || strings.Contains(key, "..") {
 		return "", fmt.Errorf("localfs: %w %q", objectstore.ErrInvalidKey, key)
 	}
+	// Control characters (NUL, CR, tab…) are never legal in an object key
+	// or filesystem path: handing one to os.Open fails deep in syscall
+	// code (EINVAL) which the HTTP layer can only report as 500. Reject up
+	// front as a bad key so it classifies as 400. S3-compatible stores
+	// forbid the same characters, so the future S3 adapter keeps this check.
+	for _, r := range key {
+		if r < 0x20 || r == 0x7f {
+			return "", fmt.Errorf("localfs: %w %q contains a control character", objectstore.ErrInvalidKey, key)
+		}
+	}
 	target := filepath.Join(s.root, filepath.FromSlash(key))
 	rel, err := filepath.Rel(s.root, target)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {

@@ -98,6 +98,8 @@ func TestPathTraversalRejected(t *testing.T) {
 		"sup_x/../../escape.txt",
 		"..",
 		"",
+		"a\x00b",     // NUL: os.Open fails with EINVAL (must be 400, not 500)
+		"cr\r\n.txt", // other control chars are illegal object keys too
 	} {
 		_, err := st.Put(ctx, bad, "x", "", strings.NewReader("x"), 1)
 		if !errors.Is(err, objectstore.ErrInvalidKey) {

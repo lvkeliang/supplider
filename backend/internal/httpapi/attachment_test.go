@@ -42,6 +42,19 @@ func TestAttachmentDownloadStatusClassification(t *testing.T) {
 		}
 	}
 
+	// Control characters in the key (percent-encoded NUL reaches the
+	// handler decoded) once died in syscall open (EINVAL) → 500; they are
+	// now classified as bad keys → 400.
+	for _, path := range []string{
+		"/api/v1/attachments/a%00b",
+		"/api/v1/attachments/sup_x/a%0db.txt",
+	} {
+		w := do(t, s, http.MethodGet, path, "")
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("control-char key %q: got %d, want 400 (body=%q)", path, w.Code, w.Body.String())
+		}
+	}
+
 	// Well-formed key, no stored object → 404, not 400/500.
 	w := do(t, s, http.MethodGet, "/api/v1/attachments/sup_x/missing-file.bin", "")
 	if w.Code != http.StatusNotFound {
