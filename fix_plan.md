@@ -34,6 +34,32 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：前端启动连接闸门——sidecar 冷启动未就绪时自动重试，不再首屏永久"后端未连接"
+
+Tauri 外壳注释一直声称"窗口立即打开、**前端轮询直到 API 就绪**"，但前端实际只在
+App 挂载时发一次 `features()`、列表也只在挂载时拉一次，**根本没有重试**。桌面窗口在
+Go sidecar 完成启动前就会首绘（冷盘 / 杀软扫描未签名 exe 可能拖几秒），此刻
+`fetch` 直接 `Failed to fetch`：顶栏停在"后端未连接"琥珀标、列表停在错误/空态，必须
+手动重启应用——直接伤害"双击即用"。本轮补上与外壳 20s readiness 预算对齐的启动闸门。
+
+- **`App.tsx` 连接状态机** `connecting → online → offline`：挂载即以 500ms 间隔轮询
+  `GET /api/v1/features`，最多 40 次（≈20s，对齐 `src-tauri/main.rs` 的 100×200ms
+  readyz 预算）。成功→`online` 并保存 feature matrix；超时→`offline`。`connecting`
+  显示品牌启动屏（旋转指示 + "正在启动本地服务…/首次启动可能需要几秒钟"）；`offline`
+  显示"无法连接本地服务"+ 安全软件提示与**重新连接**按钮（回到 connecting 再轮询）。
+- **只在 online 后挂载业务视图**（list/form/detail/import/settings/compare 连同铃铛），
+  使各视图挂载期的首次请求必然成功；运行中之后的偶发失败仍由各视图就地报错（既有行为，
+  不在本轮扩大范围）。移除了旧的一次性 `featError` 琥珀标（被闸门取代）。纯前端、零新
+  依赖（只用 Tailwind 的 `animate-spin`，无额外库），web/Tauri 同源同构。
+- 验证：tsc 通过、`build-frontend.sh` 构建并内嵌（bundle 214.6KB / gzip 66.4KB），
+  产物实测含三条启动态文案；用 500ms 轮询脚本对"延迟 1.5s 才拉起 sidecar"建模——sidecar
+  一起来下一次轮询即拿到 `features` 200（约 1s 内翻转），证明闸门依赖的"端口未通时
+  fetch reject / 就绪后 200"转换成立；sidecar 内嵌的新 bundle 实测可下发并含启动闸门。
+  本机无前端测试运行器（无 vitest/playwright），逻辑为简单的 setTimeout 轮询状态机，
+  以 tsc+真机网络时序验证；后端无改动，全量 Go 测试不受影响。
+- 后挂（非本轮）：online 之后 sidecar 中途崩溃的全局重连（当前各视图就地报错、铃铛 60s
+  自愈轮询），可在专门一轮统一做。
+
 ### 2026-09-09：API 健壮性——畸形分页游标 / 附件 key 不再 500（输入错误统一 4xx）
 
 对在跑的 personal/SQLite 真机做畸形输入黑盒扫描时发现两处"客户端输入错误被当成
