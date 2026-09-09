@@ -48,6 +48,17 @@ linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M 
 
 **唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。
 
+### 2026-09-09：坐实 SQLite 多进程并发写（sidecar 与 MCP 同库）
+
+SETUP.md 承诺"App 开着 srm-mcp 也能并发读写（SQLite WAL 多进程安全）"。核查 DSN 配置正确：
+`busy_timeout(5000)` + `journal_mode(WAL)` + `synchronous(NORMAL)` + `foreign_keys(ON)`，
+:memory: 单连接 pin。此前无并发测试，新增 `TestConcurrentWritesTwoHandlesSameFile`：两个 Store
+句柄打开同一文件（模拟 sidecar 进程 + MCP 进程），40 个 goroutine 交替 Put（每次都写
+suppliers/supplier_categories/suppliers_fts 三表），断言零错误、40 行全提交、任一句柄可读回
+对方已提交数据——即 WAL 单写 + busy_timeout 等待确实兑现，不会 SQLITE_BUSY 500。-count=3
+稳定通过（本机无 gcc，-race 不可用；此处并发由 SQLite 文件锁仲裁而非共享 Go 内存，非 cgo
+modernc 驱动也不需要）。Go 双 tag 全量绿、三 tier 编译、vet/fmt 净。纯加测试，无行为变更。
+
 ### 2026-09-09：CLI 端到端冒烟 + xlsx 导出成功提示修复
 
 对真实 sidecar 跑通 PRD 要求的全部核心 CLI 命令（成功标准"srm-cli 全部核心命令可用"此前只有分块单测）：add（JSON stdin 两家）→ search/list → info → export json+xlsx → compare，全部行为正确（搜索命中、资质列、并排对比、xlsx 为合法 Excel 2007+ 文件、json bundle count=2）。发现一个真实（小）UX 缺陷：`srm-cli export --format xlsx` 成功提示为 "exported **?** suppliers"——旧 countExported 对非 JSON 一律返回 `?`（CLI 不解析 xlsx），看起来像失败/占位。修复：JSON 显示实际计数（jsonCount 解 bundle.count，异常才 `?`），xlsx 改为 "exported suppliers workbook (xlsx, N bytes)"，去掉误导性占位；删旧 helper。加 TestJSONCount 3 例。默认/personal 全量绿、三 tier 编译、vet/fmt 净。
