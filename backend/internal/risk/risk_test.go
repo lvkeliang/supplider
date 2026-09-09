@@ -200,3 +200,72 @@ func TestNonConstructionSupplierWithoutQuals(t *testing.T) {
 		t.Error("trade supplier must not fire construction-without-quals rule")
 	}
 }
+
+// A 15-digit all-numeric value is the pre-2015 工商注册号, a legitimate
+// identifier — it must hint (low) to complete the unified code, never flag
+// the supplier as a shell company.
+func TestLegacyRegistrationNumberIsLowHintNotForgery(t *testing.T) {
+	s := baseSupplier()
+	s.BasicInfo.CreditCode = "330106000123456"
+	rep := risk.Evaluate(s, now)
+	if !hasSignal(rep, "R104") {
+		t.Fatalf("legacy registration number should fire R104: %+v", rep.Signals)
+	}
+	if hasSignal(rep, "R102") || hasSignal(rep, "R103") {
+		t.Errorf("legacy number must not fire high-severity code rules: %+v", rep.Signals)
+	}
+	if rep.ShellRisk {
+		t.Errorf("a 15-char legacy number on a complete profile must not set shell risk: %+v", rep.Signals)
+	}
+	// A wrong length that is NOT 15 digits stays high.
+	s.BasicInfo.CreditCode = "12345"
+	if rep := risk.Evaluate(s, now); !hasSignal(rep, "R102") || !rep.ShellRisk {
+		t.Errorf("5-digit garbage must still fire R102 and shell risk: %+v", rep.Signals)
+	}
+	// 15 chars containing letters is not a legacy registration number.
+	s.BasicInfo.CreditCode = "ABCDE0000000000X"
+	if rep := risk.Evaluate(s, now); !hasSignal(rep, "R102") {
+		t.Errorf("15-char non-numeric value must fire R102: %+v", rep.Signals)
+	}
+}
+
+// Thousands separators in registered capital must parse to the full amount,
+// not collapse to its leading digit (a false low-capital signal).
+func TestCapitalWithThousandsSeparators(t *testing.T) {
+	s := baseSupplier()
+	s.BasicInfo.CreditCode = validCode("91330100MA2000000") // checksum-valid, no R1xx
+	// Force the capital rule to be the only thing under test with a young
+	// profile excluded: keep all other base fields intact.
+	for _, cap_ := range []string{"1,000万人民币", "1，000.50万元", "200万"} {
+		s.BasicInfo.RegisteredCapital = cap_
+		rep := risk.Evaluate(s, now)
+		if hasSignal(rep, "R301") {
+			t.Errorf("capital %q must not fire low-capital R301: %+v", cap_, rep.Signals)
+		}
+	}
+	s.BasicInfo.RegisteredCapital = "99万"
+	if rep := risk.Evaluate(s, now); !hasSignal(rep, "R301") {
+		t.Errorf("99万 should fire R301: %+v", rep.Signals)
+	}
+}
+
+// Chinese-locale establishment-date spellings must still run the
+// young-company rule (silently skipping them was a false negative).
+func TestYoungCompanyChineseDateSpellings(t *testing.T) {
+	s := baseSupplier()
+	s.BasicInfo.CreditCode = validCode("91330100MA2000000")
+	// 60 days before the frozen clock → young company, in several spellings.
+	young := now.AddDate(0, 0, -60) // 2026-07-10
+	for _, ds := range []string{
+		young.Format("2006-01-02"),
+		young.Format("2006/1/2"),
+		young.Format("2006.1.2"),
+		young.Format("2006年1月2日"),
+	} {
+		s.BasicInfo.EstablishmentDate = ds
+		rep := risk.Evaluate(s, now)
+		if !hasSignal(rep, "R201") {
+			t.Errorf("establishment %q should fire young-company R201: %+v", ds, rep.Signals)
+		}
+	}
+}

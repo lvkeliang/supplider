@@ -70,6 +70,12 @@ func Evaluate(s *domain.Supplier, now time.Time) Report {
 	switch {
 	case code == "":
 		rep.add(Signal{"R101", SevLow, "未填写统一社会信用代码，建议补全以便核验"})
+	case isLegacyRegistrationNumber(code):
+		// A 15-digit all-digit value is the PRE-2015 工商注册号 (business
+		// registration number), issued before 三证合一 replaced it with the
+		// 18-char unified code. Real companies legitimately carry it; it is
+		// not a forgery, so it is a data-completeness hint, never a shell flag.
+		rep.add(Signal{"R104", SevLow, "填写的是 15 位旧版工商注册号，建议补全为 18 位统一社会信用代码以便核验"})
 	case len(code) != 18:
 		rep.add(Signal{"R102", SevHigh, fmt.Sprintf(
 			"统一社会信用代码长度为 %d 位，应为 18 位（疑似伪造或录入错误）", len(code))})
@@ -240,13 +246,26 @@ func CheckCreditCode(code string) bool {
 
 // ---- loose local parsers (never fatal) ----
 
+// dateLayouts lists accepted establishment-date spellings. Chinese-locale
+// forms (slash/dot/年月日, padding optional) parse the same as ISO so the
+// young-company rule still evaluates imported/spreadsheet data instead of
+// silently skipping it.
+var dateLayouts = []string{
+	"2006-1-2",
+	"2006/1/2",
+	"2006.1.2",
+	"2006年1月2日",
+}
+
 func parseISODate(s string) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}, false
 	}
-	if t, err := time.ParseInLocation("2006-01-02", s, time.UTC); err == nil {
-		return t, true
+	for _, layout := range dateLayouts {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+			return t, true
+		}
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		u := t.UTC()
@@ -260,8 +279,26 @@ var capitalRe = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*(亿|万)?`)
 // parseRegisteredCapital extracts registered capital in YUAN from strings
 // like "1000万人民币", "500万元", "100万", "1.2亿". Bare numbers are
 // treated as yuan. Returns false when no number is present.
+// isLegacyRegistrationNumber reports a 15-digit all-numeric pre-2015
+// business registration number (工商注册号), the standard the unified
+// social credit code replaced in the 三证合一 reform.
+func isLegacyRegistrationNumber(code string) bool {
+	if len(code) != 15 {
+		return false
+	}
+	for i := 0; i < 15; i++ {
+		if code[i] < '0' || code[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func parseRegisteredCapital(s string) (float64, bool) {
-	m := capitalRe.FindStringSubmatch(strings.TrimSpace(s))
+	// Tolerate thousands separators: "1,000万" / "1，000.50 万元" must not
+	// collapse to the leading "1" (a false low-capital signal).
+	s = strings.NewReplacer(",", "", "，", "").Replace(strings.TrimSpace(s))
+	m := capitalRe.FindStringSubmatch(s)
 	if m == nil {
 		return 0, false
 	}
