@@ -139,7 +139,21 @@ func truncToDate(t time.Time) time.Time {
 	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// parseExpiryDate accepts the stored ISO date ("2026-10-01") and,
+// expiryDateLayouts lists the accepted date spellings, most canonical
+// first. Chinese users frequently type "2026/10/1", "2026.10.1" or
+// "2026年10月1日"; rejecting these silently meant the certificate never
+// raised a 90/30/7 reminder, so every common spelling is accepted. Go's
+// numeric layouts also accept the zero-padded form, so "2006-1-2" covers
+// "2026-01-02" too.
+var expiryDateLayouts = []string{
+	"2006-1-2",
+	"2006/1/2",
+	"2006.1.2",
+	"2006年1月2日",
+}
+
+// parseExpiryDate accepts the stored ISO date ("2026-10-01"), common
+// Chinese-locale spellings (slash/dot/年月日, zero padding optional) and,
 // defensively, a full RFC3339 timestamp, returning UTC midnight. Empty or
 // unparseable strings report false — the reminder scan skips them instead
 // of failing the whole batch.
@@ -148,8 +162,10 @@ func parseExpiryDate(s string) (time.Time, bool) {
 	if s == "" {
 		return time.Time{}, false
 	}
-	if t, err := time.ParseInLocation("2006-01-02", s, time.UTC); err == nil {
-		return t, true
+	for _, layout := range expiryDateLayouts {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+			return t, true
+		}
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return truncToDate(t), true

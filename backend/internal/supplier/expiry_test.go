@@ -85,23 +85,65 @@ func TestExpiringQualificationsEdgeAndBadDates(t *testing.T) {
 	// Full RFC3339 timestamp instead of a bare date — accepted, normalized.
 	mkSupplierWithQuals(t, svc, "时间戳公司",
 		domain.Qualification{Type: "时间戳资质", Expiry: frozenClock.AddDate(0, 0, 3).Format(time.RFC3339)})
-	// Empty and unparseable expiry strings — skipped, never error the scan.
+	// A Chinese-locale slash date (7 days out) is a real date and alerts.
+	mkSupplierWithQuals(t, svc, "斜杠日期公司",
+		domain.Qualification{Type: "斜杠资质", Expiry: "2026/09/15"})
+	// Empty and genuinely unparseable expiry strings — skipped, never error
+	// the scan (long-term certs / free-form notes).
 	mkSupplierWithQuals(t, svc, "无到期日公司",
 		domain.Qualification{Type: "长期资质", Expiry: ""},
-		domain.Qualification{Type: "乱写资质", Expiry: "2026/09/01"})
+		domain.Qualification{Type: "乱写资质", Expiry: "长期有效"})
 
 	alerts, err := svc.ExpiringQualifications(ctx, 0) // 0 → default 90-day window
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if len(alerts) != 2 {
-		t.Fatalf("got %d alerts, want 2 (today + RFC3339; bad/empty skipped): %+v", len(alerts), alerts)
+	if len(alerts) != 3 {
+		t.Fatalf("got %d alerts, want 3 (today + RFC3339 + slash date; bad/empty skipped): %+v", len(alerts), alerts)
 	}
 	if alerts[0].DaysLeft != 0 || alerts[0].Bucket != supplier.Bucket7d {
 		t.Errorf("today cert: days=%d bucket=%q, want 0 / %s", alerts[0].DaysLeft, alerts[0].Bucket, supplier.Bucket7d)
 	}
 	if alerts[1].DaysLeft != 3 {
 		t.Errorf("rfc3339 cert days = %d, want 3", alerts[1].DaysLeft)
+	}
+	if alerts[2].DaysLeft != 7 || alerts[2].Expiry != "2026/09/15" {
+		t.Errorf("slash-date cert = %+v, want 7 days left with raw string preserved", alerts[2])
+	}
+}
+
+// TestExpiryAcceptsChineseDateSpellings proves every common Chinese-locale
+// date spelling drives reminders (they used to be silently skipped, so the
+// certificate never raised a 90/30/7 alert). All resolve to the same calendar
+// day; the raw stored string is shown verbatim in the alert.
+func TestExpiryAcceptsChineseDateSpellings(t *testing.T) {
+	svc := expirySvc()
+	ctx := context.Background()
+	// Every spelling resolves to frozen clock + 10 days = 2026-09-18.
+	spellings := map[string]string{
+		"ISO 零填充": "2026-09-18",
+		"ISO 非填充": "2026-9-18",
+		"斜杠零填充":   "2026/09/18",
+		"斜杠非填充":   "2026/9/18",
+		"点分":      "2026.09.18",
+		"中文年月日":   "2026年09月18日",
+		"中文非填充":   "2026年9月18日",
+	}
+	for label, s := range spellings {
+		mkSupplierWithQuals(t, svc, "日期写法公司"+label,
+			domain.Qualification{Type: "资质", Expiry: s})
+	}
+	alerts, err := svc.ExpiringQualifications(ctx, 90)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(alerts) != len(spellings) {
+		t.Fatalf("got %d alerts, want %d (every spelling parses): %+v", len(alerts), len(spellings), alerts)
+	}
+	for _, a := range alerts {
+		if a.DaysLeft != 10 {
+			t.Errorf("%s (%q): days_left = %d, want 10", a.SupplierName, a.Expiry, a.DaysLeft)
+		}
 	}
 }
 
