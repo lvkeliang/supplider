@@ -34,6 +34,41 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：MCP stdio 单消息隔离——工具 panic/超长消息不再杀死 Agent 连接；CLI 空白 id 就地拒绝
+
+第三轮黑盒健壮性审计转向**外部 Agent 接入面**（MCP stdio + srm-cli，MVP 成功标准之一）。
+对真机二进制发了约 30 个畸形用例（坏 JSON-RPC、错版本、未知方法/工具、参数类型错乱
+`{"id":12345}`/`{"ids":"a,b,c"}`、缺参数、limit=999999、坏 flag、缺参数/空 id）。
+协议层与 CLI 总体很稳（错误全部正确分类、连接存活），但发现两处真实脆弱点：
+
+- **MCP 无 per-message panic 防护（最关键）**：`Serve` 直接在循环里 `dispatch`，工具
+  handler 里任何意外 panic（未来新工具、异常存储数据）都会沿 stdio 栈**杀死整个 MCP
+  进程**——对 Agent 而言就是工具集突然全部消失、连接断开，且无任何 JSON-RPC 错误。
+  修复：每消息走带 `recover` 的 `handleLineDispatch`，panic 翻译为 JSON-RPC
+  internal error（-32603，id:null），栈写到 stderr（stdout 只承载协议），循环继续。
+  dispatcher 可注入以便测试 panic 路径。
+- **超长单行直接终止服务**：旧实现用 `bufio.Scanner`，单行超 4MiB（巨型 add_supplier）
+  触发 token-too-long 后 `Serve` 返回错误、**进程退出**。改为 `bufio.Reader.ReadString`
+  循环，超长行回 -32600 invalid request 后继续服务（内存上限不变：4MiB/行）。
+  parse error 仍按 JSON-RPC 规范回 id:null；只有成功解析的无 id notification 静默。
+- **CLI 空白 id 报惑性错误**：`srm-cli info ""`（及 blacklist/watch/review/appeal/
+  risk/compare/merge 的空白位置参数）越过参数个数检查，请求落到嵌入式 UI 的 SPA
+  fallback（200 text/html），CLI 报 `invalid character '<'`。新增共享
+  `rejectBlankIDs`（8 个命令），空白 id 就地返回 "supplier id must not be blank"；
+  正常用法与 404 路径不受影响。
+- 顺手清理：`.gitignore` 增补 `backend/{suppliderd,srm-cli,srm-mcp}`——本地
+  `go build` 产物（`backend/srm-cli` 已在 git status 里挂了多轮）；release 产物仍走
+  dist/ 与 src-tauri/binaries/。
+- 确认无问题的点（不改动）：MCP 参数类型错误被 `decodeArgs` 容错为零值→工具层
+  "id is required" 等可纠正文本错误；limit=999999 被存储适配器 `Normalize()` 钳到 100
+  （HTTP/MCP/CLI 三条路径同一保证）；CLI 坏 flag 由 flag 包退出码 2 处理。
+- 测试：`mcp/robustness_test.go`（同包内测试）——注入 panicking dispatcher 断言
+  -32603 且不误判 notification；真实 Serve 循环喂 坏 JSON→缺参工具调用→4MiB+1 超长行
+  →ping，断言 4 条响应、parse error id:null、超长 -32600、最后 ping 成功（连接存活）；
+  `cmd/srm-cli/main_test.go`（该包首个测试）钉死 rejectBlankIDs 7 个场景。
+- 验证：真机二进制复验（坏行/超长后 ping 仍应答；CLI 8 个空白 id 用例清晰报错、
+  正常 list/info 404 不受影响）；default+personal 全量绿、三 tag 编译、gofmt/vet 净。
+
 ### 2026-09-09：黑盒审计修复——畸形策略体不再落库最严等级（0），附件 key 含控制字符返回 400 而非 500
 
 延续"哨兵错误是否在 HTTP 边界被正确分类"的方法论，对在跑的 personal/SQLite 真机做

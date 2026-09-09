@@ -55,3 +55,9 @@ backend/internal/webui/dist/*
 
 # Standalone CLI/MCP release artifacts (scripts/build-tools.sh → dist/tools).
 dist/
+
+# Local `go build` artifacts in backend/ (release artifacts go to dist/ via
+# scripts/build-tools.sh and src-tauri/binaries/ via build-sidecar.sh).
+backend/suppliderd
+backend/srm-cli
+backend/srm-mcp

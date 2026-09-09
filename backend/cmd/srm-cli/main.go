@@ -280,6 +280,20 @@ func apiBase() string {
 	return "http://127.0.0.1:7612"
 }
 
+// rejectBlankIDs guards against blank positional supplier ids: "" passes a
+// NArg count check, but the request then lands on the sidecar's embedded-UI
+// SPA fallback (200 text/html) and fails with a confusing
+// "invalid character '<'" JSON error. Call after the command's own
+// argument-count check; n is how many leading positional args are ids.
+func rejectBlankIDs(fs *flag.FlagSet, n int) error {
+	for i := 0; i < n; i++ {
+		if strings.TrimSpace(fs.Arg(i)) == "" {
+			return fmt.Errorf("supplier id must not be blank")
+		}
+	}
+	return nil
+}
+
 // ---------- add ----------
 
 func cmdAdd(args []string) error {
@@ -442,6 +456,9 @@ func cmdInfo(args []string) error {
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("info requires a supplier id")
+	}
+	if err := rejectBlankIDs(fs, 1); err != nil {
+		return err
 	}
 	id := fs.Arg(0)
 
@@ -771,6 +788,9 @@ func cmdCompare(args []string) error {
 	if fs.NArg() < 2 {
 		return fmt.Errorf("compare requires at least two supplier ids")
 	}
+	if err := rejectBlankIDs(fs, 2); err != nil {
+		return err
+	}
 
 	showQual, showDelivery, showPrice := true, true, true
 	if strings.TrimSpace(*criteria) != "" {
@@ -1028,6 +1048,9 @@ func cmdRisk(args []string) error {
 
 	// With an id: that supplier's live signal list.
 	if fs.NArg() > 0 {
+		if err := rejectBlankIDs(fs, 1); err != nil {
+			return err
+		}
 		id := fs.Arg(0)
 		resp, err := http.Get(apiBase() + "/api/v1/suppliers/" + url.PathEscape(id) + "/risk")
 		if err != nil {
@@ -1135,6 +1158,9 @@ func cmdBlacklist(args []string, add bool) error {
 	if fs.NArg() < 1 {
 		return fmt.Errorf("blacklist requires a supplier id")
 	}
+	if err := rejectBlankIDs(fs, 1); err != nil {
+		return err
+	}
 	id := fs.Arg(0)
 	path := "/unblacklist"
 	var body io.Reader
@@ -1180,6 +1206,9 @@ func cmdWatch(args []string, add bool) error {
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("watch requires a supplier id")
+	}
+	if err := rejectBlankIDs(fs, 1); err != nil {
+		return err
 	}
 	id := fs.Arg(0)
 	b, _ := json.Marshal(map[string]bool{"watched": add})
@@ -1432,6 +1461,9 @@ func cmdMerge(args []string) error {
 	if fs.NArg() < 2 {
 		return fmt.Errorf("merge requires two supplier ids: merge <保留(主)> <并入并归档(重复)>")
 	}
+	if err := rejectBlankIDs(fs, 2); err != nil {
+		return err
+	}
 	masterID, dupID := fs.Arg(0), fs.Arg(1)
 	body, _ := json.Marshal(map[string]string{"duplicate_id": dupID})
 	resp, err := http.Post(
@@ -1480,6 +1512,9 @@ func cmdReview(args []string) error {
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("review requires a supplier id")
+	}
+	if err := rejectBlankIDs(fs, 1); err != nil {
+		return err
 	}
 	id := fs.Arg(0)
 
@@ -1877,6 +1912,9 @@ func cmdAppeal(args []string, file bool) error {
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("appeal requires a supplier id")
+	}
+	if err := rejectBlankIDs(fs, 1); err != nil {
+		return err
 	}
 	id := fs.Arg(0)
 

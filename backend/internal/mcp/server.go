@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"runtime/debug"
 
 	"github.com/supplider/supplider/backend/internal/supplier"
 )
@@ -73,43 +74,81 @@ const (
 	errInternal       = -32603
 )
 
+// maxMessageBytes bounds one JSON-RPC line. MCP messages are small; this is
+// well above any add_supplier payload. An over-long line is rejected per
+// message (the connection keeps serving) instead of killing the process.
+const maxMessageBytes = 4 * 1024 * 1024
+
 // Serve reads JSON-RPC messages (one object per line) from r and writes
 // responses to w until stdin closes (EOF) or ctx is cancelled. Messages
 // without an id are notifications and get no response.
+//
+// Every message is isolated: a panic inside a tool handler (or an oversized
+// line) is reported as a JSON-RPC internal error and the server keeps
+// running — an agent's MCP connection must never die because one tool call
+// hit unexpected data.
 func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
-	scanner := bufio.NewScanner(r)
-	// MCP messages are small, but raise the token cap well above the 64KB
-	// default so a large add_supplier payload doesn't trip the scanner.
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	reader := bufio.NewReaderSize(r, 64*1024)
 	enc := json.NewEncoder(w)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(bytesTrimSpace(line)) == 0 {
-			continue
+	for {
+		line, readErr := reader.ReadString('\n')
+		if len(bytesTrimSpace([]byte(line))) > 0 {
+			id, result, rerr, isNotification := s.handleLine(ctx, line)
+			// Per the spec, only a successfully-parsed notification (method
+			// present, no id) stays silent; parse errors answer id: null.
+			if !isNotification {
+				writeResp(enc, id, result, rerr)
+			}
 		}
-		var req rpcRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			writeResp(enc, nil, nil, &rpcError{Code: errParseError, Message: "parse error: " + err.Error()})
-			continue
+		if readErr != nil {
+			if readErr == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("mcp: read stdin: %w", readErr)
 		}
-		if req.JSONRPC != "2.0" && req.JSONRPC != "" {
-			writeResp(enc, req.ID, nil, &rpcError{Code: errInvalidReq, Message: "only JSON-RPC 2.0 is supported"})
-			continue
-		}
+	}
+}
 
-		// Notifications carry no id — per the spec they get no response.
-		isNotification := len(req.ID) == 0 || string(req.ID) == "null"
-		result, rerr := s.dispatch(ctx, req.Method, req.Params)
-		if isNotification {
-			continue
+// dispatcherFunc routes a parsed method (the production Server wires this
+// to dispatch; tests inject a panicking one to prove the guard).
+type dispatcherFunc func(ctx context.Context, method string, params json.RawMessage) (any, *rpcError)
+
+// handleLine parses and dispatches ONE JSON-RPC line with a panic guard.
+// isNotification is true only for a successfully-parsed id-less message.
+// Malformed protocol gets its null/id response; a handler panic becomes a
+// JSON-RPC internal error so the stdio loop survives it.
+func (s *Server) handleLine(ctx context.Context, line string) (json.RawMessage, any, *rpcError, bool) {
+	return s.handleLineDispatch(ctx, line, s.dispatch)
+}
+
+func (s *Server) handleLineDispatch(ctx context.Context, line string, dispatch dispatcherFunc) (id json.RawMessage, result any, rerr *rpcError, isNotification bool) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.logger.Printf("panic in tool dispatch: %v\n%s", rec, debug.Stack())
+			id, result, rerr, isNotification = nil, nil,
+				&rpcError{Code: errInternal, Message: fmt.Sprintf("internal error: %v", rec)}, false
 		}
-		writeResp(enc, req.ID, result, rerr)
+	}()
+
+	trimmed := bytesTrimSpace([]byte(line))
+	if len(trimmed) > maxMessageBytes {
+		return nil, nil, &rpcError{Code: errInvalidReq, Message: "message too large (max 4 MiB per line)"}, false
 	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("mcp: read stdin: %w", err)
+
+	var req rpcRequest
+	if err := json.Unmarshal(trimmed, &req); err != nil {
+		return nil, nil, &rpcError{Code: errParseError, Message: "parse error: " + err.Error()}, false
 	}
-	return nil
+	if req.JSONRPC != "2.0" && req.JSONRPC != "" {
+		return req.ID, nil, &rpcError{Code: errInvalidReq, Message: "only JSON-RPC 2.0 is supported"}, false
+	}
+	// Notifications carry no id — per the spec they get no response.
+	if len(req.ID) == 0 || string(req.ID) == "null" {
+		isNotification = true
+	}
+	result, rerr = dispatch(ctx, req.Method, req.Params)
+	return req.ID, result, rerr, isNotification
 }
 
 func writeResp(enc *json.Encoder, id json.RawMessage, result any, rerr *rpcError) {
