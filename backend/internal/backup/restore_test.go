@@ -233,6 +233,67 @@ func TestStageRequiresDataDirAndChecker(t *testing.T) {
 }
 
 // zipSlipArchive builds a zip whose DB entry escapes the extraction root.
+// rawArchive builds a zip from explicit (name → content) entries, used to
+// craft layout-collision archives the real writer never produces.
+func rawArchive(t *testing.T, entries map[string][]byte, dirs []string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, d := range dirs {
+		if _, err := zw.Create(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, data := range entries {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestStageRejectsLayoutCollisions(t *testing.T) {
+	dataDir := t.TempDir()
+	manifest, _ := json.Marshal(validManifest())
+
+	cases := map[string][]byte{
+		// A bare FILE named "attachments" would be renamed over the live
+		// attachments DIRECTORY at apply time, breaking object storage.
+		"attachments is a file": rawArchive(t, map[string][]byte{
+			backup.DBName:       []byte("db"),
+			"attachments":       []byte("not-a-directory"),
+			backup.ManifestName: manifest,
+		}, nil),
+		// A DIRECTORY entry named like the DB must not shadow/block the file.
+		"supplider.db is a dir": rawArchive(t, map[string][]byte{
+			backup.DBName:       []byte("db"),
+			backup.ManifestName: manifest,
+		}, []string{"supplider.db/"}),
+		// Manifest as a directory.
+		"manifest is a dir": rawArchive(t, map[string][]byte{
+			backup.DBName:       []byte("db"),
+			backup.ManifestName: manifest,
+		}, []string{"manifest.json/"}),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := backup.Stage(bytes.NewReader(body), dataDir, acceptChecker); err == nil {
+				t.Fatal("layout-collision archive must be rejected")
+			}
+			if _, staged, _ := backup.PendingRestore(dataDir); staged {
+				t.Fatal("rejected archive must leave no pending restore")
+			}
+		})
+	}
+}
+
 func zipSlipArchive(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer

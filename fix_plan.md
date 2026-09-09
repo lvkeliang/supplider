@@ -34,6 +34,32 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：备份/恢复链路审计——布局类型冲突拒绝 + 真实 SQLite 全链路往返测试
+
+审计数据安全关键路径"备份（VACUUM INTO 一致性快照 + 附件 + manifest zip）与应用内恢复
+（校验→暂存→启动时原子替换→回退副本）"。现有防护已相当完整：zip-slip 路径清洗
+（绝对路径/`..`/顶层白名单只允许 supplider.db、manifest.json、attachments/**）、
+symlink/设备条目拒绝（ModeType）、zip 炸弹双限（单文件/总解压 ≤2GiB、条目 ≤10 万，
+LimitReader 防伪造 header）、快照只读 integrity_check + suppliers 表存在性校验、
+替换前 WAL/SHM 先行入回退目录、失败逆向恢复、回退副本只留最新、跨版本 schema 用纯
+IF NOT EXISTS 增量迁移（降级打开未来版本不破坏数据，user_version 仅盖章不门控）。
+补齐两处：
+
+- **布局类型冲突可通过 Stage**：zip 条目 `attachments`（**普通文件**，非目录）通过路径
+  白名单（校验只看顶层名），Stage 成功；启动时 ApplyPendingRestore 把该文件 rename 到
+  attachments——之后所有附件读写（需目录）全部失效，且无错误提示。同类：`supplider.db/`
+  目录条目可能遮蔽文件、`manifest.json/` 目录条目。修复：safeExtractPath 增加类型约束
+  ——db/manifest 必须是文件、attachments 根必须是目录（attachments/ 下嵌套文件/目录
+  仍正常），冲突直接判"path outside allowed layout"。真机 HTTP 复验构造包返回 400。
+- **全链路缺真实存储往返测试**：backup 包测试用桩 checker/假 DB，sqlite 包单测
+  SnapshotTo/CheckSnapshot 各自独立，没有一条测试覆盖"真实库→WriteArchive→Stage（真
+  checker）→ApplyPendingRestore→重开"。新增 sqlite/backup_restore_e2e_test.go：有数据
+  库+settings+附件的源库出包，恢复到另一个已有旧库的目录，断言恢复后供应商/settings/
+  附件字节完整、旧库仅存在于唯一 rollback 目录（含 supplider.db）、staging 已消费。
+- 测试：backup 包新增 3 个布局冲突用例；probe 验证 16 个穿越/混淆路径全部拒绝、7 个
+  合法路径（含 `./supplider.db`、`attachments/../supplider.db` 等价归一）放行。
+- 验证：default+personal 全量绿、三 tag 编译、gofmt/vet 净。
+
 ### 2026-09-09：Excel 导入列映射确定性修复——重复表头不再随机取值、未知字段键不再静默丢列
 
 审计核心录入路径"Excel 批量导入（模板校验 + 列映射）"。模板/别名匹配/1000 行 2.2–2.4s

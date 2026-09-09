@@ -199,9 +199,27 @@ func safeExtractPath(root, name string) (target string, allowed bool, isDir bool
 	if idx := strings.Index(clean, string(filepath.Separator)); idx >= 0 {
 		top = clean[:idx]
 	}
+	attachmentsDir := filepath.FromSlash(strings.TrimSuffix(AttachmentsPrefix, "/"))
 	switch {
-	case clean == filepath.FromSlash(DBName), clean == ManifestName:
-	case top == filepath.FromSlash(strings.TrimSuffix(AttachmentsPrefix, "/")):
+	case clean == filepath.FromSlash(DBName):
+		// The snapshot is always a regular file; a directory entry under
+		// this name would make the later file extraction fail or shadow it.
+		if isDir {
+			return "", false, false
+		}
+	case clean == ManifestName:
+		if isDir {
+			return "", false, false
+		}
+	case clean == attachmentsDir:
+		// The attachments root must be a DIRECTORY. A bare file here would
+		// pass staging and be renamed over the live attachments directory
+		// at apply time, breaking every attachment read/write afterwards.
+		if !isDir {
+			return "", false, false
+		}
+	case top == attachmentsDir:
+		// Any nested attachment path is fine (files or dirs).
 	default:
 		return "", false, false
 	}
