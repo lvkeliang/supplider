@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -88,6 +89,15 @@ var fieldByKey = func() map[string]fieldSpec {
 	m := make(map[string]fieldSpec, len(fields))
 	for _, f := range fields {
 		m[f.Key] = f
+	}
+	return m
+}()
+
+// fieldKeySet is the set of valid fixed-field mapping keys.
+var fieldKeySet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(fields))
+	for _, f := range fields {
+		m[f.Key] = struct{}{}
 	}
 	return m
 }()
@@ -227,14 +237,19 @@ func Inspect(data []byte) (*Inspection, error) {
 	dataRows := nonEmptyRows(rows[1:])
 
 	suggested := make(map[int]string, len(headers))
+	seenField := map[string]bool{}
 	for i, h := range headers {
 		trim := strings.TrimSpace(h)
 		if trim == "" {
 			suggested[i] = FieldIgnore
 			continue
 		}
-		if key, ok := aliasIndex[normalizeHeader(trim)]; ok {
+		if key, ok := aliasIndex[normalizeHeader(trim)]; ok && !seenField[key] {
+			// First occurrence owns the fixed field; later columns with the
+			// same alias (e.g. "名称" and "公司名称") fall through to custom
+			// so their distinct values are preserved, not randomly picked.
 			suggested[i] = key
+			seenField[key] = true
 		} else {
 			// Unrecognized column: preserve it as a custom field (文档式).
 			suggested[i] = FieldCustom
@@ -263,6 +278,13 @@ func Inspect(data []byte) (*Inspection, error) {
 // Build applies mapping (column index → field key) to every data row and
 // returns import items. Fully-empty rows are skipped; mapping columns set to
 // FieldCustom become custom_fields keyed by the header text.
+//
+// Columns are processed LEFT TO RIGHT so a file with two columns mapped to
+// the same scalar field (e.g. both "名称" and "公司名称") behaves
+// deterministically: the first non-empty value wins, list fields
+// (categories/products) are unioned, and duplicated custom headers join with
+// "；" instead of overwriting at random. Unknown field keys are rejected — a
+// typo must never silently drop a whole column.
 func Build(data []byte, mapping map[int]string, defaults Defaults) ([]supplier.ImportItem, error) {
 	rows, err := readRows(data)
 	if err != nil {
@@ -272,6 +294,23 @@ func Build(data []byte, mapping map[int]string, defaults Defaults) ([]supplier.I
 		return nil, fmt.Errorf("import: spreadsheet is empty")
 	}
 	headers := rows[0]
+
+	// Sorted column list — never range a map (random order made duplicated
+	// mappings nondeterministic).
+	cols := make([]int, 0, len(mapping))
+	for col, key := range mapping {
+		if key == FieldIgnore {
+			continue
+		}
+		if key != FieldCustom {
+			if _, known := fieldKeySet[key]; !known {
+				return nil, fmt.Errorf("import: unknown field key %q for column %d (expected a listed field, %q or %q)",
+					key, col, FieldCustom, FieldIgnore)
+			}
+		}
+		cols = append(cols, col)
+	}
+	sort.Ints(cols)
 
 	items := make([]supplier.ImportItem, 0, len(rows)-1)
 	for ri, row := range rows[1:] {
@@ -289,26 +328,48 @@ func Build(data []byte, mapping map[int]string, defaults Defaults) ([]supplier.I
 		var qualType, qualLevel string
 		var perf domain.Performance
 		var hasPerf bool
+		seenScalar := map[string]bool{}
 
-		for col, key := range mapping {
-			if col >= len(row) || key == FieldIgnore {
+		for _, col := range cols {
+			key := mapping[col]
+			if col < 0 || col >= len(row) {
 				continue
 			}
 			val := strings.TrimSpace(row[col])
 			if val == "" {
 				continue
 			}
-			if key == FieldCustom {
-				if h := strings.TrimSpace(headerAt(headers, col)); h != "" {
-					custom[normalizeHeader(h)] = val
+			switch {
+			case key == FieldCustom:
+				h := normalizeHeader(strings.TrimSpace(headerAt(headers, col)))
+				if h == "" {
+					continue
 				}
-				continue
-			}
-			if applyPerfField(&perf, key, val) {
+				// Duplicate custom header: preserve both values.
+				if prev, ok := custom[h]; ok {
+					custom[h] = fmt.Sprintf("%v；%s", prev, val)
+				} else {
+					custom[h] = val
+				}
+			case isPerfField(key):
+				// A non-empty cell means the row carries an evaluation
+				// record even when a score is unparseable (kept as a
+				// zero-score record, per documented import semantics).
 				hasPerf = true
-				continue
+				// First column with a usable value wins (an unparseable
+				// score cell must not block a later duplicate column).
+				if !seenScalar[key] && applyPerfFieldWrote(&perf, key, val) {
+					seenScalar[key] = true
+				}
+			case isListField(key):
+				appendListField(&in, key, val)
+			default:
+				if seenScalar[key] {
+					continue // duplicate scalar mapping: first column wins
+				}
+				seenScalar[key] = true
+				applyField(&in, &qualType, &qualLevel, key, val)
 			}
-			applyField(&in, &qualType, &qualLevel, key, val)
 		}
 
 		if qualType != "" {
@@ -326,10 +387,61 @@ func Build(data []byte, mapping map[int]string, defaults Defaults) ([]supplier.I
 	return items, nil
 }
 
-// applyPerfField writes a performance-score cell into the per-row record.
-// Returns true when key is a performance column. Scores are parsed 0–5;
-// unparseable or out-of-range values are ignored (the service validates).
-func applyPerfField(perf *domain.Performance, key, val string) bool {
+// isListField reports a fixed field whose repeated columns must be unioned
+// rather than overwrite one another.
+func isListField(key string) bool {
+	return key == "categories" || key == "products"
+}
+
+// appendListField unions one cell's list values into the input, deduplicating
+// while preserving first-seen order.
+func appendListField(in *supplier.CreateInput, key, val string) {
+	switch key {
+	case "categories":
+		in.Categories = unionStrings(in.Categories, splitCategories(val))
+	case "products":
+		seen := map[string]bool{}
+		for _, p := range in.Products {
+			seen[p.Name] = true
+		}
+		for _, p := range splitProducts(val) {
+			if !seen[p.Name] {
+				seen[p.Name] = true
+				in.Products = append(in.Products, p)
+			}
+		}
+	}
+}
+
+// unionStrings appends the new strings not already present, order-stable.
+func unionStrings(existing, extra []string) []string {
+	seen := map[string]bool{}
+	for _, s := range existing {
+		seen[s] = true
+	}
+	for _, s := range extra {
+		if !seen[s] {
+			seen[s] = true
+			existing = append(existing, s)
+		}
+	}
+	return existing
+}
+
+// isPerfField reports a performance-column key.
+func isPerfField(key string) bool {
+	switch key {
+	case "feedback", "score", "delivery", "quality", "cooperation":
+		return true
+	}
+	return false
+}
+
+// applyPerfFieldWrote writes a performance cell into the per-row record and
+// reports whether a value was actually stored. Scores are parsed 0–5; an
+// unparseable/out-of-range value is ignored (the service validates) and
+// reports false so a later duplicate column may still supply a usable value.
+func applyPerfFieldWrote(perf *domain.Performance, key, val string) bool {
 	switch key {
 	case "feedback":
 		perf.Feedback = val
@@ -337,23 +449,23 @@ func applyPerfField(perf *domain.Performance, key, val string) bool {
 	case "score":
 		if v, ok := parseScore(val); ok {
 			perf.Score = v
+			return true
 		}
-		return true
 	case "delivery":
 		if v, ok := parseScore(val); ok {
 			perf.Delivery = v
+			return true
 		}
-		return true
 	case "quality":
 		if v, ok := parseScore(val); ok {
 			perf.Quality = v
+			return true
 		}
-		return true
 	case "cooperation":
 		if v, ok := parseScore(val); ok {
 			perf.Cooperation = v
+			return true
 		}
-		return true
 	}
 	return false
 }
