@@ -12,13 +12,15 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    旧"本机无 Rust 工具链"标记已更正。后续每轮验证清单第 4 项：src-tauri 有改动必须本机
    `cargo check` 通过（前端 dist + sidecar 二进制需先就位）。
 
-2. **Tauri 安装包真机验证**：shell 代码与 sidecar 已完成并通过 HTTP 层 E2E（见下）；
-   本机 Rust 工具链已装，可跑 `cargo tauri build` 打 Linux 安装包做本地完整链路验证。
-   打 `v*` tag 触发 GitHub Release 产出四平台安装包。剩余验证：tag 后下载 Release
-   里的安装包，确认体积（目标 ~15MB 安装器；实测 stripped sidecar ~16MB，嵌入后安装器
-   预计 20-25MB 量级）与双击拉起 sidecar；未签名，macOS 需解除隔离属性。
-   图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。后挂：代码签名/公证
-   （TAURI_SIGNING_PRIVATE_KEY secrets）以启用 Tauri 自动更新。
+2. ~~**Tauri 安装包本机打包验证**~~ **已完成（2026-09-10，见"已完成"章节）**：本机
+   `npx @tauri-apps/cli@^2 build` 全量打 Linux 三形态成功（deb/rpm 各 12MB、AppImage
+   86MB），并真机跑通 deb 解包安装与 AppImage：bundled sidecar 拉起、per-user 数据目录、
+   CRUD+跨字段搜索、重启持久化、kill -9 respawn、SIGTERM 零孤儿。打包首跑还抓到一个
+   **会让 release.yml 首 tag 必红的真实配置缺陷**（beforeBuildCommand 的 npm --prefix
+   路径），已修。**剩余（需人工/远端，CI 无法替代）**：打 `v*` tag 后下载四平台 Release
+   安装包真机安装确认（macOS 未签名需解除隔离；Windows NSIS 与两 mac dmg 本机无法验证）；
+   代码签名/公证（TAURI_SIGNING_PRIVATE_KEY secrets）以启用 Tauri 自动更新。
+   图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。
 
 3. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
    Meilisearch 是 Rust 独立 server 二进制、无可内嵌 Go 库，塞进个人版会破坏"单二进制
@@ -64,9 +66,56 @@ linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M 
 tauri-build 2 的 build.rs 无条件按当前 target triple 拷贝 externalBin sidecar，
 缺失即 exit(1)，cargo check 同样跑 build.rs。已修 ci.yml（见 2026-09-10 条目）。
 
-**唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。
+**剩余项（需人工，CI 无法替代）**：**Linux 已由 2026-09-10 本机全量打包+真机验证覆盖**（deb/rpm 12MB、AppImage 86MB，见"已完成"最新条目）。待验证：`v*` tag 后 Windows NSIS 与两 mac dmg 在真机的首启、sidecar 同目录定位、per-user app data；以及代码签名/公证。Linux 仅剩在干净系统上 apt 安装确认依赖自动拉取一次。
 
 ## 已完成
+
+### 2026-09-10：本机 `tauri build` 全链路首跑——修复 beforeBuildCommand 路径缺陷（首 tag 必红），Linux 三形态真机验证
+
+此前所有 Tauri 打包结论都来自静态审计与 CI release tag（从未真正跑过）。本机 Rust
+就绪后首次全量 `npx --yes @tauri-apps/cli@^2 build`，立刻暴露一个**会让 release.yml
+Linux desktop job 在第一个 `v*` tag 必红**的真实配置缺陷，并完成全部 Linux 产物的真机
+验证：
+
+- **缺陷（关键）**：`tauri.conf.json` 的 `beforeDevCommand`/`beforeBuildCommand` 是
+  `npm --prefix ../frontend run …`，但 Tauri 2 CLI 执行 hook 的工作目录**固定为
+  frontendDist 配置项的父目录**（实测探针 `sh -c 'echo $(pwd)'`：无论从 src-tauri/
+  还是仓库根调 CLI，cwd 都是 `<repo>/frontend`）——`--prefix ../frontend` 因此解析成
+  `ralph/frontend`（仓库外！），hook 直接 ENOENT 失败。CI 的 tauri-action 从仓库根
+  调用，同样必败。修复：改为裸 `npm run dev` / `npm run build`（cwd 已是 frontend）。
+  （2026-09-08 那条"打包后连不上 sidecar"的静态审计只关注了 API base，没跑构建所以
+  没发现路径问题；两条教训互证：**打包配置不能只静态读，必须真机跑一次**。）
+- **产物（x86_64-linux，release）**：release 二进制 18MB；**deb 12MB / rpm 12MB /
+  AppImage 86MB**。deb Depends 为 `libwebkit2gtk-4.1-0, libgtk-3-0`（标准 Tauri
+  依赖，apt 自动拉取；"零依赖"指不要 Docker/数据库，WebKit 由包管理器提供）；
+  Installed-Size 34MB。AppImage 因 linuxdeploy-plugin-gtk 把 WebKitGTK 运行时整体
+  打进去而 86MB（deb 用系统 WebKit 才压到 12MB）——~15MB 目标只适用于 deb/rpm，
+  AppImage 自包含是 Tauri+WebKit 生态的普遍体积，可接受。
+- **真机验证（DISPLAY :0）**：① **deb 解包运行**（`dpkg-deb -x` 到临时目录，无需
+  root）：`/usr/bin/supplider-desktop` 旁的 `suppliderd` 被 shell 正确解析拉起
+  （Tauri 对 bundled 二进制按 `当前exe所在目录/suppliderd-<triple>` 定位，deb 布局
+  `/usr/bin/{supplider-desktop,suppliderd}` 可用）；readyz 200、features 为 personal
+  矩阵、per-user 数据目录（`$XDG_DATA_HOME/com.supplider.desktop/`）生成 supplider.db
+  +attachments；② **AppImage 直接运行**：同样秒级 ready；③ 两条产物上 POST 供应商
+  （注意 region 是嵌套 `basic_info.region.{province,city}`，扁平 province/city 会
+  400）→ 201、列表命中；**跨字段检索 `q=杭州土建`（地域+品类）命中**（bigram
+  协调在打包版行为一致）；④ **重启数据持久化**（AppImage 退出重开供应商仍在）；
+  ⑤ **release 二进制上 kill -9 sidecar → respawn**（上轮监督特性在打包版同样生效）；
+  ⑥ SIGTERM 应用 → 150ms 内干净退出、端口释放、零孤儿。
+- **内存实测**：shell(WebKit) RSS **140–166MB** + sidecar ~21MB。PRD 写的"运行内存
+  ~80MB"低于 WebKitGTK 实际基线（Electron 200MB+ 的对比仍成立但 80MB 达不到），
+  后续 README/PRD 期望应按实测修正（本轮先记录，不做文档面扩大）。
+- **AppImage 网络坑（环境性，非代码问题）**：linuxdeploy 需从 GitHub 下载
+  AppRun-x86_64 / linuxdeploy / linuxdeploy-plugin-appimage / **type2-runtime**，
+  本机首次两次分别报 `io: unexpected end of file`（下载截断）与 appimagetool
+  `Failed to download runtime file`——缓存落全后（`~/.cache/tauri/`）或直接重试即
+  成功。CI runner 网络稳，本页失败重试即可；已在 .ralph/AGENT.md 记一行。rpm 本机
+  无 rpm 工具链，但 `file` 确认为合法 RPM v3.0，由 Tauri 同一套 bundler 产出且
+  CI 同环境复现，未做安装级验证（需 root）。
+- 验证：`cargo check`/`cargo fmt --check` 净（tauri.conf.json 改动触发 generate_context!
+  重编译，正常）；Go 侧零改动但按清单复验 default+personal 各 14 包全绿、三 tag
+  编译、vet/fmt 净；前端 typecheck 与 `npm run build` 通过（bundle 215.4KB/66.8KB
+  gzip，hook 修复后构建本身即实证）。
 
 ### 2026-09-10：sidecar 监督进程——中途崩溃自动 respawn，不必再双击应用；SIGTERM/SIGINT 也能干净收子进程
 

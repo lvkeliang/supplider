@@ -60,9 +60,15 @@ cd src-tauri
 cargo build --release
 
 # Full Tauri desktop bundle (all platforms via CI)
-# 本机只打当前平台：
+# 本机只打当前平台（无 cargo tauri 子命令时：npx --yes @tauri-apps/cli@^2 build，
+# 从仓库根目录运行即可，CLI 自动发现 src-tauri/tauri.conf.json）：
 cd src-tauri
 cargo tauri build
+# 注意：tauri.conf.json 的 beforeBuildCommand/beforeDevCommand 运行时 cwd 固定为
+# frontendDist 的同级目录（<repo>/frontend），与 CLI 调用目录无关——hook 里写
+# npm 命令不要带 --prefix ../frontend（实测会解析到仓库外）。裸 `npm run build` 即可。
+# AppImage 打包需从 GitHub 下载 AppRun/linuxdeploy/type2-runtime，网络抖动会报
+# `io: unexpected end of file` / `Failed to download runtime file`，重试即可。
 
 # Full build pipeline (what CI runs)
 bash scripts/build-frontend.sh
