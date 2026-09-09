@@ -34,6 +34,34 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：可见性处置状态机审计——修复两条失真的申诉审计轨迹，补齐 SQLite 持久化生命周期测试
+
+前三轮黑盒审计针对"输入错误分类"；本轮改审**时间驱动的核心业务逻辑**：PRD 五级可见性
+策略收紧的数据处置状态机（扫描→7 天缓冲→自动降级→申诉暂停/裁决）。主路径（标记/幂等/
+超时降级/申诉暂停/授予例外/驳回即降/主人自改清除）本就有内存存储测试钉住且走查无误；
+本轮发现两处**审计轨迹失真**（记录了未发生的动作），并补上 SQLite 存储层零覆盖的缺口。
+
+- **策略放宽期间未决申诉被误记为"主人自行调整"**：记录在 cap=1 下被标记、主人申诉
+  （appealed），管理员随后把策略放宽到 cap=4；下一次 enforce 的"已合规→清除标记"分支
+  只看 `enf.Pending`（申诉态仍为 true），统一写 `appealed → resolved_owner_adjusted`
+  ——主人什么都没做，申诉也未经裁决就消失，审计记录却称其自行调整。修复：该分支按
+  `enf.Appealed` 区分，申诉中记录一律记 `resolved_appeal_moot_compliant`（合规致申诉
+  无标的；主人在申诉后自己改合规也同样适用——标签不声称是谁的动作，只陈述"已合规"）。
+- **驳回已合规申诉时伪造 4→4 可见性变更**：`ResolveVisibilityAppeal(grant=false)` 在
+  记录因策略放宽已合规时，先把 visibility 写成原值（prev==target），仍追加
+  `visibility old=new` 变更条目且申诉标签是 `denied_downgraded`（实际没降级）。修复：
+  合规时只关申诉（`denied_closed_compliant`），不写 visibility 条目；真超限时才降级
+  并保留 `denied_downgraded` + visibility 变更。
+- **补齐 SQLite 生命周期覆盖**：此前 vis_enforcement 只在内存存储上测过，JSONB
+  往返/重开库零覆盖。新增 `sqlite/visibility_lifecycle_test.go`：标记（deadline
+  now+7d）→关库重开→申诉态/note/deadline 完整保留→推进 30 天，申诉中不降级→
+  驳回后再次重开，vis=1、enf=nil、人工降级 change_log（float64 往返）、列表徽标清除。
+- 另增两例内存测试钉死上述标签；走查确认无问题、未改动的点：deadline 当天（daysLeft=0）
+  仍在缓冲、次日才降级；主人在缓冲期把可见性先改合规再调高不会重置倒计时（需先经一次
+  enforce 才会清标记）；例外（申诉成立）在后续可见性编辑时才失效；列表 keyset 按
+  created_at 分页，enforce 改 updated_at 不影响翻页；归档记录不参与处置、恢复后重新进入。
+- 验证：default+personal 全量绿、三 tag 编译、gofmt/vet 净。
+
 ### 2026-09-09：MCP stdio 单消息隔离——工具 panic/超长消息不再杀死 Agent 连接；CLI 空白 id 就地拒绝
 
 第三轮黑盒健壮性审计转向**外部 Agent 接入面**（MCP stdio + srm-cli，MVP 成功标准之一）。

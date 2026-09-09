@@ -7,6 +7,7 @@ package supplier_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -279,6 +280,94 @@ func TestVisibilityOwnerAdjustmentClearsFlag(t *testing.T) {
 	if rep2.Downgraded != 0 || rep2.Flagged != 0 {
 		t.Fatalf("late sweep must stay quiet: %+v", rep2)
 	}
+}
+
+func TestVisibilityAppealMootedWhenPolicyLoosened(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	svc := newVisService(&now)
+	ctx := context.Background()
+	tight := visPolicy // cap 1
+	loose := supplier.VisibilityPolicy{MaxLevel: domain.VisCompany, BufferDays: 7}
+
+	doc, _ := svc.Create(ctx, visInput(domain.VisCompany))
+	_, _ = svc.EnforceVisibilityPolicy(ctx, tight)
+	if _, err := svc.AppealVisibility(ctx, doc.ID, "需要全公司可见"); err != nil {
+		t.Fatalf("Appeal: %v", err)
+	}
+
+	// Admin loosens the policy while the appeal is open: the record is
+	// compliant again, so the open enforcement/appeal closes as moot —
+	// NEVER mislabeled as an owner adjustment (the owner did nothing).
+	rep, err := svc.EnforceVisibilityPolicy(ctx, loose)
+	if err != nil {
+		t.Fatalf("Enforce loose: %v", err)
+	}
+	if rep.Resolved != 1 || rep.Appealed != 0 || len(rep.Items) != 0 {
+		t.Fatalf("moot sweep report wrong: %+v", rep)
+	}
+	done, _ := svc.Get(ctx, doc.ID)
+	if done.VisEnforcement != nil || done.Visibility != domain.VisCompany || done.VisException {
+		t.Errorf("mooted record state wrong: enf=%+v vis=%d exc=%v",
+			done.VisEnforcement, done.Visibility, done.VisException)
+	}
+	sawMoot := false
+	for _, c := range done.ChangeLog {
+		if c.Field == "vis_enforcement" && c.Old == "appealed" {
+			if c.New != "resolved_appeal_moot_compliant" {
+				t.Errorf("closure label = %v, want resolved_appeal_moot_compliant", c.New)
+			}
+			sawMoot = true
+		}
+	}
+	if !sawMoot {
+		t.Error("change_log missing appeal-moot closure entry")
+	}
+	// Nothing left to resolve once auto-closed.
+	if _, err := svc.ResolveVisibilityAppeal(ctx, doc.ID, true, loose); err == nil {
+		t.Error("resolving the auto-closed appeal must error")
+	}
+}
+
+func TestVisibilityAppealDeniedWhileCompliantDoesNotFabricateChange(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	svc := newVisService(&now)
+	ctx := context.Background()
+	tight := visPolicy
+	loose := supplier.VisibilityPolicy{MaxLevel: domain.VisCompany, BufferDays: 7}
+
+	doc, _ := svc.Create(ctx, visInput(domain.VisCompany))
+	_, _ = svc.EnforceVisibilityPolicy(ctx, tight)
+	_, _ = svc.AppealVisibility(ctx, doc.ID, "x")
+
+	// Admin denies the appeal, but the policy was loosened in the meantime:
+	// the record is compliant, so only close the appeal — no 4→4 no-op
+	// visibility entry and no "downgraded" label.
+	denied, err := svc.ResolveVisibilityAppeal(ctx, doc.ID, false, loose)
+	if err != nil {
+		t.Fatalf("Resolve deny: %v", err)
+	}
+	if denied.Visibility != domain.VisCompany || denied.VisEnforcement != nil {
+		t.Errorf("compliant record must keep its level: vis=%d enf=%+v",
+			denied.Visibility, denied.VisEnforcement)
+	}
+	var labels []string
+	sawClose := false
+	for _, c := range denied.ChangeLog {
+		labels = append(labels, c.Field+":"+fmt.Sprint(c.Old)+"→"+fmt.Sprint(c.New))
+		if c.Field == "visibility" {
+			t.Errorf("no visibility change may be logged: %v → %v", c.Old, c.New)
+		}
+		if c.Field == "vis_appeal" && c.Old == "appealed" {
+			sawClose = true
+			if c.New != "denied_closed_compliant" {
+				t.Errorf("appeal label = %v, want denied_closed_compliant", c.New)
+			}
+		}
+	}
+	if !sawClose {
+		t.Error("change_log missing the appealed→closed entry")
+	}
+	t.Logf("change log: %v", labels)
 }
 
 // ptr returns a pointer to v (pointer fields distinguish "unchanged" from

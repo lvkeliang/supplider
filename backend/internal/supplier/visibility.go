@@ -171,13 +171,20 @@ func (s *Service) EnforceVisibilityPolicy(ctx context.Context, policy Visibility
 
 			switch {
 			case doc.Visibility <= policy.MaxLevel:
-				// Compliant. A lingering flag means the owner adjusted the
-				// level themselves during the buffer — close it out.
+				// Compliant. A lingering flag means the record became
+				// compliant during the buffer — close it out. The closure
+				// reason matters for the audit trail: when an appeal was
+				// open the owner's adjustment did not dismiss it, and it may
+				// instead have been mooted by a loosened policy.
 				if enf != nil && enf.Pending {
 					doc.VisEnforcement = nil
+					resolution := "resolved_owner_adjusted"
+					if enf.Appealed {
+						resolution = "resolved_appeal_moot_compliant"
+					}
 					doc.ChangeLog = append(doc.ChangeLog, domain.ChangeEntry{
 						Field: "vis_enforcement", Old: enforcementStateLabel(enf),
-						New: "resolved_owner_adjusted", Date: now, Source: domain.SourceSystem,
+						New: resolution, Date: now, Source: domain.SourceSystem,
 					})
 					doc.UpdatedAt = now
 					rep.Resolved++
@@ -338,23 +345,25 @@ func (s *Service) ResolveVisibilityAppeal(ctx context.Context, id string, grant 
 		}
 	} else {
 		// 申诉驳回：downgrade to the nearest compliant level immediately.
+		// If the record is already compliant (e.g. policy loosened while
+		// the appeal was open), only close it — never fabricate a no-op
+		// visibility change in the audit trail.
 		prev := doc.Visibility
-		target := policy.MaxLevel
-		if prev <= target {
-			target = prev // already compliant: just close the appeal
-		}
-		doc.Visibility = target
 		doc.VisEnforcement = nil
-		doc.ChangeLog = append(doc.ChangeLog,
-			domain.ChangeEntry{
-				Field: "vis_appeal", Old: "appealed", New: "denied_downgraded",
+		entry := domain.ChangeEntry{
+			Field: "vis_appeal", Old: "appealed", New: "denied_downgraded",
+			Date: now, Source: domain.SourceManual,
+		}
+		if prev <= policy.MaxLevel {
+			entry.New = "denied_closed_compliant"
+			doc.ChangeLog = append(doc.ChangeLog, entry)
+		} else {
+			doc.Visibility = policy.MaxLevel
+			doc.ChangeLog = append(doc.ChangeLog, entry, domain.ChangeEntry{
+				Field: "visibility", Old: prev, New: policy.MaxLevel,
 				Date: now, Source: domain.SourceManual,
-			},
-			domain.ChangeEntry{
-				Field: "visibility", Old: prev, New: target,
-				Date: now, Source: domain.SourceManual,
-			},
-		)
+			})
+		}
 	}
 	doc.UpdatedAt = now
 	if err := s.store.Put(ctx, doc); err != nil {
