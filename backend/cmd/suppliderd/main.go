@@ -11,6 +11,7 @@ import (
 	"flag"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -33,6 +34,26 @@ func main() {
 	flag.Parse()
 
 	log.Printf("suppliderd starting: tier=%s addr=%s data-dir=%q", tier.Current(), *addr, *dataDir)
+
+	// Acquire the listen socket BEFORE touching the data directory. If the
+	// port is already held by a healthy suppliderd (an orphaned sidecar
+	// after a hard app crash), defer to it and exit cleanly so the desktop
+	// UI connects to the running instance instead of showing a permanent
+	// "后端未连接". This must precede restore/store open so a duplicate
+	// process never swaps the live library or contends on the DB.
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			probeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if awaitExistingInstance(probeCtx, "http://"+*addr, 2*time.Second) {
+				cancel()
+				log.Printf("another suppliderd is already serving http://%s and is healthy; exiting so the UI uses the running instance", *addr)
+				return
+			}
+			cancel()
+		}
+		log.Fatalf("listen %s: %v", *addr, err)
+	}
 
 	// Staged restore (应用内恢复/迁移) must complete BEFORE any DB handle
 	// exists — it replaces supplider.db and attachments on disk.
@@ -78,7 +99,8 @@ func main() {
 	apiServer.StartMaintenanceLoops(ctx)
 
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		// Serve on the listener acquired at startup (single-instance gate).
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}
 	}()

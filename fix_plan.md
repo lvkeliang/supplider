@@ -34,6 +34,42 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：sidecar 单实例交接——修复崩溃后再次双击应用永久"后端未连接"
+
+桌面端 Tauri 固定在 `127.0.0.1:7612` 拉起 Go sidecar，正常退出时 Rust 在
+`RunEvent::ExitRequested` 里 kill 子进程。但若 Tauri 进程被**强杀/崩溃**（任务管理器、
+断电、panic），孤儿 sidecar 仍占着端口与 SQLite 文件；下次双击应用，新 sidecar
+`ListenAndServe` 报 `bind: address already in use` 后在 goroutine 里 `log.Fatalf`
+退出——界面永远卡在"后端未连接"，普通用户无法自救。本轮在 **Go 侧（可本地验证、零依赖、
+四 tag 同一业务代码）**加单实例交接兜底。
+
+- **最早闸门**（`cmd/suppliderd/main.go`）：把 `net.Listen("tcp",addr)` 提前到
+  `flag.Parse` 之后、**`applyPendingRestore` 与 `storefactory.Open` 之前**。随后用持有的
+  listener 跑 `srv.Serve(ln)`（不再 `ListenAndServe`）。这样：① 判断为"重复实例"而退出时
+  **绝不打开/替换活库、绝不消费暂存恢复包**；② 首个实例从启动起就占住端口，消除"探测期间
+  被第三方抢绑"的竞态。
+- **交接规则**（`cmd/suppliderd/instance.go`）：bind 返回 `EADDRINUSE`（Windows 上
+  `syscall.EADDRINUSE` 即 WSAEADDRINUSE 10048，`errors.Is` 跨平台成立）时探测占端口者：
+  `GET /readyz` 需 200 且 `status=="ok"`，`GET /api/v1/features` 需 200 且
+  `tier ∈ {personal,small_business,enterprise}`。两者满足→认定是健康的本产品 sidecar，
+  新进程打日志后 **exit 0**（Tauri 前端轮询到仍在服务的实例，应用照常可用）；否则按原状
+  `log.Fatalf`（别的程序占端口，绝不误退）。`awaitExistingInstance` 以 100ms 节奏轮询约 2s，
+  覆盖"对方已绑端口但尚未就绪"的同时启动窗口；探测用短超时 ctx + `MaxBytesReader(64KiB)`，
+  不被坏响应拖住启动。
+- 测试：`instance_test.go` 6 例（httptest）——健康 personal 实例识别；三 tag tier 各识别；
+  全 404 的**外部进程被拒**（且在等待窗口内返回、不长挂）；readyz 非 ok / tier 未知 / 无
+  tier / 非 JSON 四变体被拒；端口已无监听快速失败；对方 503 两次后才变健康也能识别。全量
+  default+personal 绿，四 tag 编译，gofmt/vet 净。
+- E2E（personal 真机二进制）：A 用 dataA 起在 7701 → B 用**不存在的** dataB 同端口启动：
+  **exit 0**、日志"another suppliderd ... healthy; exiting"、`dataB 未被创建`（证明闸门在
+  restore/open 之前）、API 仍由 A（pid 不变）提供、端口仅一个监听者。再起 python
+  `http.server`（/readyz=404）占 7702 → sidecar 探测约 2s 后 **exit 1** `listen ... address
+  already in use`、dataC 未被触碰。
+- 边界与取舍：新进程只"让位"不"接管"——无法跨平台拿到并 kill 占端口的孤儿；极少数强杀场景
+  会残留一个孤儿进程，但**应用每次都能正常打开**（连接到存活实例），远优于永久断连。Tauri
+  侧可后挂 `tauri-plugin-single-instance`（Rust，需 CI 编译验证）在窗口层直接复用既有实例，
+  与本兜底互补；本轮不动 Rust（本机无 Rust 工具链，无法提交"已验证"的改动）。
+
 ### 2026-09-09：关注供应商 + 应用内变更通知铃铛（PRD 维护：变更推送通知关注者 + 资质到期提醒）
 
 关注一家供应商后，它出现空壳风险 / 被拉黑 / 移出黑名单 / 归档 / 恢复 / 合并，或资质进入
