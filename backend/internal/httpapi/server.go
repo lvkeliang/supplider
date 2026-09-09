@@ -1472,6 +1472,16 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, datamodel.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, datamodel.ErrInvalidPagination):
+		// A malformed/garbled ?cursor= (bad base64/JSON, stale link) is the
+		// caller's fault — answer 400 so the client can restart from page 1
+		// instead of treating an opaque token failure as a server crash.
+		writeError(w, http.StatusBadRequest, "invalid pagination cursor")
+	case errors.Is(err, objectstore.ErrInvalidKey):
+		// A malformed or traversal-shaped attachment key (../, absolute,
+		// empty). The store already refuses to escape its root; classify it
+		// as a bad request, not an internal error.
+		writeError(w, http.StatusBadRequest, "invalid attachment key")
 	default:
 		// Domain "not found" errors (e.g. attachment/record missing) are 404.
 		if strings.Contains(err.Error(), "not found") {

@@ -152,12 +152,12 @@ func (s *Store) URL(_ context.Context, key string) (string, error) {
 func (s *Store) resolve(key string) (string, error) {
 	key = filepath.ToSlash(strings.TrimSpace(key))
 	if key == "" || key == "." || strings.Contains(key, "..") {
-		return "", fmt.Errorf("localfs: invalid object key %q", key)
+		return "", fmt.Errorf("localfs: %w %q", objectstore.ErrInvalidKey, key)
 	}
 	target := filepath.Join(s.root, filepath.FromSlash(key))
 	rel, err := filepath.Rel(s.root, target)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("localfs: object key %q escapes storage root", key)
+		return "", fmt.Errorf("localfs: %w %q escapes storage root", objectstore.ErrInvalidKey, key)
 	}
 	return target, nil
 }

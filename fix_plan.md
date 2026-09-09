@@ -34,6 +34,43 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：API 健壮性——畸形分页游标 / 附件 key 不再 500（输入错误统一 4xx）
+
+对在跑的 personal/SQLite 真机做畸形输入黑盒扫描时发现两处"客户端输入错误被当成
+服务器错误（HTTP 500）"，对桌面本地应用尤其刺眼（界面只显示"internal error"，
+且监控/排障会把用户坏链接误判成崩溃）。本轮把它们归位为 4xx，并全量回归确认其余
+端点对畸形输入也不产生 500。
+
+- **分页游标**：`GET /suppliers?cursor=<坏值>` 任何非空非法游标（非法 base64
+  `!!!`、合法 base64 但非游标 JSON、`null`、含 NUL 的 `%00…`、非法百分号字节
+  `%ff%fe`）此前都 **500**。根因：适配器早已返回语义化哨兵 `datamodel.ErrInvalidPagination`
+  （memory/sqlite 两适配器都经 `DecodeCursor` 返回同一哨兵），但 `writeServiceError`
+  只特判了 `ErrNotFound`→404 和基于错误信息子串（"required"/"must be"）的 400，
+  哨兵落入默认分支→500。修复：mapper 增加 `errors.Is(ErrInvalidPagination)`→**400**
+  `invalid pagination cursor`（客户端可丢弃坏游标从第一页重来，而不是当成崩溃）。
+- **附件 key 穿越**：`GET /attachments/..%2f..%2f..%2fetc%2fpasswd` 返回 **500**。
+  localfs 的 `resolve` 早已挡住越界（不读 root 之外、无文件泄露，已验证响应体不含
+  宿主文件），但返回普通 `fmt.Errorf`，HTTP 无法归类。按"接口先行"补哨兵
+  `objectstore.ErrInvalidKey`（与既有 `ErrObjectNotFound` 并列：坏 key=400、格式
+  正确但无对象=404），localfs `resolve` 两处改用 `%w` 包装；mapper 增加
+  `errors.Is(ErrInvalidKey)`→**400**。一处映射同时覆盖下载/上传/删除（后两者 key
+  由服务端构造，仍走同一 mapper）；日后 MinIO/S3 适配器复用同一哨兵。裸 `/..` 路径
+  由 net/http 自身清洗成 301，到不了处理器，不做特判。
+- 测试：`httpapi/pagination_test.go`（该包此前无测试）——非法游标 5 种变体→400、
+  空游标→200；用服务端签发的真游标 limit=1 翻页 3 家、断言无重复且正常终止。
+  `httpapi/attachment_test.go`——接真实 localfs（t.TempDir）：百分号编码穿越 key
+  →400 且不泄露文件；格式正确但不存在→404；未挂对象存储→501。并把既有 localfs
+  穿越测试从"仅断言有错"收紧为 `errors.Is(err, ErrInvalidKey)`。全量 default+personal
+  绿，四 tag 编译，gofmt/vet 净。
+- 黑盒回归（personal 真机，覆盖变更/合并/风险/可见性/偏好/导入/通知/附件等约 30 个
+  畸形用例：坏 JSON、错误类型、越界枚举/可见性、空体、非 xlsx 字节 multipart、向
+  不存在供应商传附件等）：除上述两处外**没有别的 500**，分别得 400/404/501；
+  `limit=999999` 仍被 `Normalize()` 钳制（红线：单页 ≤100）。
+- 方法论沉淀：本地 API 输入校验已较完整，残留风险集中在"**哨兵错误是否在 HTTP 边界
+  被正确分类**"。后续再引入面向客户端的错误类型时，应在 `writeServiceError` 登记
+  `errors.Is` 映射，而非依赖错误信息子串（现有子串分支是历史兜底，可在专门一轮收敛
+  为哨兵，本轮不扩大改动面）。
+
 ### 2026-09-09：sidecar 单实例交接——修复崩溃后再次双击应用永久"后端未连接"
 
 桌面端 Tauri 固定在 `127.0.0.1:7612` 拉起 Go sidecar，正常退出时 Rust 在

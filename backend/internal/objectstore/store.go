@@ -19,6 +19,12 @@ const MaxAttachmentSize = 50 * 1024 * 1024
 // ErrObjectNotFound is returned by Get/Remove when no object matches a key.
 var ErrObjectNotFound = errors.New("objectstore: object not found")
 
+// ErrInvalidKey is returned when an object key is malformed or escapes the
+// storage root (path traversal). It is a client/input error (HTTP 400),
+// distinct from a well-formed key that simply has no object (404). Adapters
+// wrap it with %w so errors.Is works across local FS / MinIO / S3.
+var ErrInvalidKey = errors.New("objectstore: invalid object key")
+
 // ErrTooLarge is returned when an upload exceeds MaxAttachmentSize. Size is
 // the observed/declared size, Max the hard limit.
 type ErrTooLarge struct {

@@ -100,11 +100,11 @@ func TestPathTraversalRejected(t *testing.T) {
 		"",
 	} {
 		_, err := st.Put(ctx, bad, "x", "", strings.NewReader("x"), 1)
-		if err == nil {
-			t.Errorf("Put with key %q should fail", bad)
+		if !errors.Is(err, objectstore.ErrInvalidKey) {
+			t.Errorf("Put with key %q: want errors.Is ErrInvalidKey, got %v", bad, err)
 		}
-		if _, _, err := st.Get(ctx, bad); err == nil {
-			t.Errorf("Get with key %q should fail", bad)
+		if _, _, err := st.Get(ctx, bad); !errors.Is(err, objectstore.ErrInvalidKey) {
+			t.Errorf("Get with key %q: want errors.Is ErrInvalidKey, got %v", bad, err)
 		}
 	}
 }
