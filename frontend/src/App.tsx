@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { api } from './api'
+import { api, setNetworkEventListener, type NetworkEvent } from './api'
 import type { Features } from './types'
 import { SupplierList } from './components/SupplierList'
 import { SupplierForm } from './components/SupplierForm'
@@ -26,27 +26,42 @@ const TIER_LABELS: Record<string, string> = {
   enterprise: '企业版',
 }
 
-// Boot connection gate. The desktop window paints before the Go sidecar has
-// finished starting (cold disk / antivirus scan of an unsigned binary can add
-// several seconds), so the first request can fail with "Failed to fetch".
-// Poll /features until the backend answers, matching the 20s readiness budget
-// the Tauri shell uses; only mount the real screens once connected so their
-// first fetch succeeds. A later failure is surfaced by each view as before.
+// Connection gate states:
+//   connecting - cold start: poll /features up to the 20s shell budget, then
+//                fall back to the manual offline screen
+//   online     - business screens mounted; a 5s /readyz heartbeat plus
+//                passive fetch-failure reports watch the sidecar
+//   down       - sidecar vanished mid-session (crash/kill): business screens
+//                unmount and we retry FOREVER — re-launching the app spawns a
+//                fresh sidecar on the freed port (see sidecar 单实例交接),
+//                and the still-open window heals as soon as it answers
+//   offline    - cold start never succeeded; manual 重新连接 only
+//
+// On every entry to online a gateKey bump remounts the business tree, so a
+// recovered session refetches everything instead of showing stale errors.
 const CONNECT_INTERVAL_MS = 500
 const CONNECT_MAX_ATTEMPTS = 40 // 40 × 500ms ≈ 20s, mirrors the Rust shell's readiness poll
+const RECONNECT_INTERVAL_MS = 1000
+const HEARTBEAT_MS = 5000
+const HEARTBEAT_MISSES_TO_FLIP = 2
 
-type Connection = 'connecting' | 'online' | 'offline'
+type Connection = 'connecting' | 'online' | 'down' | 'offline'
 
 export default function App() {
   const [view, setView] = useState<View>({ name: 'list' })
   const [connection, setConnection] = useState<Connection>('connecting')
   const [features, setFeatures] = useState<Features | null>(null)
+  const [gateKey, setGateKey] = useState(0)
+  const [retryNonce, setRetryNonce] = useState(0)
 
+  // become-online poller: the bounded cold-start gate and the unbounded
+  // mid-session reconnect loop share one implementation.
   useEffect(() => {
-    if (connection !== 'connecting') return
+    if (connection !== 'connecting' && connection !== 'down') return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout>
     let tries = 0
+    const interval = connection === 'connecting' ? CONNECT_INTERVAL_MS : RECONNECT_INTERVAL_MS
 
     const tick = async () => {
       tries += 1
@@ -54,22 +69,72 @@ export default function App() {
         const feats = await api.features()
         if (cancelled) return
         setFeatures(feats)
+        // Remount every business view so its first request after recovery
+        // is a fresh fetch (the old subtree died in an error state).
+        setGateKey((k) => k + 1)
         setConnection('online')
         return
       } catch {
-        // Sidecar still booting (or not started); retry until the budget runs out.
+        // Sidecar still booting / still gone; retry. Cold start eventually
+        // gives up to the manual screen; a mid-session loss retries forever
+        // (recovery may arrive via a second app launch at any time).
         if (cancelled) return
-        if (tries >= CONNECT_MAX_ATTEMPTS) {
+        if (connection === 'connecting' && tries >= CONNECT_MAX_ATTEMPTS) {
           setConnection('offline')
           return
         }
-        timer = setTimeout(tick, CONNECT_INTERVAL_MS)
+        timer = setTimeout(tick, interval)
       }
     }
     void tick()
     return () => {
       cancelled = true
       clearTimeout(timer)
+    }
+  }, [connection, retryNonce])
+
+  // online watchdog: 5s /readyz heartbeat plus immediate confirmation of any
+  // rejected fetch (user action failed). HTTP 4xx/5xx count as success —
+  // only a rejected fetch means the sidecar port is gone.
+  useEffect(() => {
+    if (connection !== 'online') return
+    let misses = 0
+    let probing = false
+
+    const confirmDown = async () => {
+      if (probing) return
+      probing = true
+      try {
+        await api.readyz()
+        misses = 0 // one-off abort/blip: the backend actually answered
+      } catch {
+        setConnection('down')
+      } finally {
+        probing = false
+      }
+    }
+    const listener = (event: NetworkEvent) => {
+      if (event === 'failure') {
+        void confirmDown()
+        return
+      }
+      misses = 0
+    }
+    setNetworkEventListener(listener)
+    const heartbeat = setInterval(() => {
+      api
+        .readyz()
+        .then(() => {
+          misses = 0
+        })
+        .catch(() => {
+          misses += 1
+          if (misses >= HEARTBEAT_MISSES_TO_FLIP) setConnection('down')
+        })
+    }, HEARTBEAT_MS)
+    return () => {
+      setNetworkEventListener(null)
+      clearInterval(heartbeat)
     }
   }, [connection])
 
@@ -96,9 +161,24 @@ export default function App() {
       </BootScreen>
     )
   }
+  if (connection === 'down') {
+    return (
+      <BootScreen
+        title="本地服务连接中断"
+        subtitle="正在自动尝试重新连接，数据保存在本地不会丢失。若长时间未恢复，请完全退出 Supplider 后重新双击启动。"
+        spinner
+      >
+        <button className="btn-primary" onClick={() => setRetryNonce((n) => n + 1)}>
+          立即重试
+        </button>
+      </BootScreen>
+    )
+  }
 
   return (
-    <div className="min-h-screen">
+    // gateKey remounts the whole business tree when a lost session returns,
+    // forcing every view (and the bell) to refetch from scratch.
+    <div className="min-h-screen" key={gateKey}>
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <button

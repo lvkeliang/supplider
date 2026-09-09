@@ -34,6 +34,37 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：运行期断线自愈——sidecar 中途崩溃/被杀后窗口不再永久报错，自动重连并重挂载业务视图
+
+启动连接闸门（见上一轮）只解决了冷启动；**online 之后 sidecar 进程消失**
+（崩溃、被任务管理器结束）时，Tauri shell 不会重启 sidecar（main.rs 仅在退出
+时 kill），各视图各自停在错误态、铃铛 60s 轮询静默失败，窗口再也救不回来。
+注意 ca07fa3 解决的是反向情形（shell 死、孤儿 sidecar 活）；本轮补齐对称面。
+用户的自救路径"再双击一次"会启动第二个 shell，新 sidecar 在已释放的 7612
+端口与 SQLite 文件上正常起服（实例交接逻辑保证不与活实例冲突），于是旧窗口
+只差一个能感知恢复的前端闸门——本轮落地，纯前端、零新依赖。
+
+- **api 层健康事件钩子**（`api.ts`）：全部 5 处 `fetch`（JSON 请求、multipart
+  附件/导入、zip 恢复）收口到 `guardedFetch`；fetch reject（端口无响应）报
+  `'failure'`，**任何收到响应的请求（含 4xx/5xx）报 `'success'`**——后端报错
+  不等于后端死，绝不误翻闸门。新增 `api.readyz()` 与 shell/实例交接用同一端点。
+- **App 连接状态机扩为 `connecting | online | down | offline`**（`App.tsx`）：
+  - online 看门狗：5s `/readyz` 心跳，连续 2 次失败才翻 down（避免单次抖动/
+    休眠恢复误报）；任何业务请求失败立即用 readyz **确认探针**再翻（上传取消
+    等一次性 abort 探针会拿到响应，不翻）。
+  - down：卸载整个业务树（停掉各视图轮询与铃铛），全屏"本地服务连接中断/正在
+    自动尝试重新连接/数据不会丢失/请退出后重新双击启动"，1s 间隔**无限重连**
+    （恢复可能随时由第二次双击带来，不能像冷启动 20s 后放弃），另附"立即重试"。
+  - 恢复时重新拉 features 并 `gateKey++`：以 React key 重挂载业务树，所有视图
+    在已验证连通之后才发首请求，旧错误态不会残留。
+- 验证：tsc 通过，`build-frontend.sh` 内嵌成功（bundle 215.4KB / gzip 66.8KB，
+  仅 +0.8KB），产物断言含三条断线文案；Node fetch 真机时序建模：服务存活
+  readyz 200 → 关闭端口 fetch 立即 reject（翻闸门信号）→ 同端口重新起服务
+  readyz 200（无限重连轮询自愈）。后端零改动，`go build` 与全量测试不受影响。
+- 仍后挂（非本轮）：shell 侧 Rust 自动重启 sidecar（`CommandEvent::Terminated`
+  时 respawn）可消除"必须再双击一次"，但本机无 Rust 工具链、CI 仅在 release
+  tag 编译 Rust，改动需专门一轮连同 ci.yml 增加 `cargo check` 一起做。
+
 ### 2026-09-09：无空格中文拼接检索——"杭州混凝土"跨字段命中（bigram 协调），SQLite 与内存适配器共用同一参考匹配器
 
 中文用户检索天然不带空格：地域+品类"杭州混凝土"是一个连续 run，但文档里
@@ -98,8 +129,8 @@ Go sidecar 完成启动前就会首绘（冷盘 / 杀软扫描未签名 exe 可�
   fetch reject / 就绪后 200"转换成立；sidecar 内嵌的新 bundle 实测可下发并含启动闸门。
   本机无前端测试运行器（无 vitest/playwright），逻辑为简单的 setTimeout 轮询状态机，
   以 tsc+真机网络时序验证；后端无改动，全量 Go 测试不受影响。
-- 后挂（非本轮）：online 之后 sidecar 中途崩溃的全局重连（当前各视图就地报错、铃铛 60s
-  自愈轮询），可在专门一轮统一做。
+- ~~后挂（非本轮）：online 之后 sidecar 中途崩溃的全局重连~~ **已落地**（见本轮顶部：
+  5s 心跳 + 被动失败确认探针 → down → 无限重连 + gateKey 重挂载）。
 
 ### 2026-09-09：API 健壮性——畸形分页游标 / 附件 key 不再 500（输入错误统一 4xx）
 

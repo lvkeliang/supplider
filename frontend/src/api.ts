@@ -89,8 +89,36 @@ class ApiError extends Error {
   }
 }
 
+/**
+ * Network-health events for the App-level connection gate.
+ *
+ * fetch() only REJECTS when no response came back at all (sidecar not
+ * running, port closed) — a 4xx/5xx still resolves and means the backend is
+ * alive, so it is reported as 'success' and must never trip the gate.
+ * Rejections are the runtime "sidecar died" signal; the gate confirms with
+ * a /readyz probe before flipping state (guards against one-off aborts).
+ */
+export type NetworkEvent = 'success' | 'failure'
+let networkListener: ((event: NetworkEvent) => void) | null = null
+
+export function setNetworkEventListener(listener: ((event: NetworkEvent) => void) | null) {
+  networkListener = listener
+}
+
+/** Every outbound HTTP call goes through here so health events fire once. */
+async function guardedFetch(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    const res = await fetch(BASE + path, init)
+    networkListener?.('success')
+    return res
+  } catch (err) {
+    networkListener?.('failure')
+    throw err
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(BASE + path, {
+  const res = await guardedFetch(path, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -116,6 +144,10 @@ function withQuery(path: string, params: Record<string, string | number | boolea
 
 export const api = {
   features: () => request<Features>('GET', '/api/v1/features'),
+
+  // Liveness probe (the Tauri shell polls the same endpoint). Never errors
+  // with a JSON-parse expectation: /readyz answers {"status":"ok"}.
+  readyz: () => request<{ status?: string }>('GET', '/readyz'),
 
   // Qualification-expiry maintenance scan (资质到期提醒, 提前 90/30/7 天).
   // Non-AI: pure local date math; always available.
@@ -284,7 +316,7 @@ export const api = {
   getRestoreStatus: () =>
     request<RestoreStatus>('GET', '/api/v1/backup/restore'),
   uploadRestore: async (file: File): Promise<RestoreStatus> => {
-    const res = await fetch(BASE + '/api/v1/backup/restore', {
+    const res = await guardedFetch('/api/v1/backup/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/zip' },
       body: file,
@@ -302,7 +334,7 @@ export const api = {
   uploadAttachment: async (id: string, file: File): Promise<Supplier> => {
     const form = new FormData()
     form.append('file', file)
-    const res = await fetch(BASE + `/api/v1/suppliers/${encodeURIComponent(id)}/attachments`, {
+    const res = await guardedFetch(`/api/v1/suppliers/${encodeURIComponent(id)}/attachments`, {
       method: 'POST',
       body: form,
     })
@@ -324,7 +356,7 @@ export const api = {
   previewImport: async (file: File): Promise<Inspection> => {
     const form = new FormData()
     form.append('file', file)
-    const res = await fetch(BASE + '/api/v1/import/preview', { method: 'POST', body: form })
+    const res = await guardedFetch('/api/v1/import/preview', { method: 'POST', body: form })
     const data = await res.json().catch(() => undefined)
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
     return data as Inspection
@@ -345,7 +377,7 @@ export const api = {
     form.append('owner', owner)
     form.append('visibility', String(visibility))
     form.append('skip_duplicates', skipDuplicates ? 'true' : 'false')
-    const res = await fetch(BASE + '/api/v1/import/commit', { method: 'POST', body: form })
+    const res = await guardedFetch('/api/v1/import/commit', { method: 'POST', body: form })
     const data = await res.json().catch(() => undefined)
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
     return data as ImportReport
