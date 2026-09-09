@@ -186,3 +186,99 @@ func toString(v any) string {
 	}
 	return ""
 }
+
+func TestMergePreservesScoreOnlyPerformanceRecords(t *testing.T) {
+	svc := supplier.NewService(memory.New())
+	ctx := context.Background()
+
+	masterIn := namedInput("评分主体有限公司", "91330100MA27X3001A", "杭州")
+	// Score-only evaluation: no project/date (a legal record; validation
+	// bounds scores only).
+	masterIn.Performance = []domain.Performance{{Score: 4.0}}
+	master, err := svc.Create(ctx, masterIn)
+	if err != nil {
+		t.Fatalf("create master: %v", err)
+	}
+
+	dupIn := namedInput("评分主体公司", "91330100MA27X3002B", "杭州")
+	dupIn.Performance = []domain.Performance{
+		{Score: 2.0, Feedback: "配合度差"}, // distinct: survives
+		{Delivery: 5.0, Quality: 3.0},  // distinct dimensions: survives
+		{Score: 4.0},                   // byte-identical to master's: dedup
+	}
+	dup, err := svc.Create(ctx, dupIn)
+	if err != nil {
+		t.Fatalf("create duplicate: %v", err)
+	}
+
+	merged, res, err := svc.MergeSuppliers(ctx, master.ID, dup.ID)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if res.PerformanceAdded != 2 {
+		t.Errorf("PerformanceAdded = %d, want 2 (distinct score-only records)", res.PerformanceAdded)
+	}
+	if len(merged.PerformanceHistory) != 3 {
+		t.Errorf("performance history = %d records, want 3", len(merged.PerformanceHistory))
+	}
+	// Rating must include all three distinct evaluations:
+	// (4.0, 2.0, mean(5,3)=4.0)/3 ≈ 3.33.
+	if merged.Rating < 3.32 || merged.Rating > 3.34 {
+		t.Errorf("rating = %.2f, want ~3.33 over all retained records", merged.Rating)
+	}
+}
+
+func TestMergeEnrichesUnnumberedQualificationWithCertData(t *testing.T) {
+	svc := supplier.NewService(memory.New())
+	ctx := context.Background()
+
+	masterIn := namedInput("资质主体有限公司", "91330100MA27X4001A", "杭州")
+	// Same type+level, recorded without a certificate number or expiry.
+	masterIn.Qualifications = []domain.Qualification{{Type: "建筑工程施工总承包", Level: "一级"}}
+	master, err := svc.Create(ctx, masterIn)
+	if err != nil {
+		t.Fatalf("create master: %v", err)
+	}
+
+	dupIn := namedInput("资质主体公司", "91330100MA27X4002B", "杭州")
+	dupIn.Qualifications = []domain.Qualification{{
+		Type: "建筑工程施工总承包", Level: "一级",
+		CertNo: "D133012345", Expiry: "2027-06-30", Issuer: "浙江省住建厅", Verified: true,
+	}}
+	dup, err := svc.Create(ctx, dupIn)
+	if err != nil {
+		t.Fatalf("create duplicate: %v", err)
+	}
+
+	merged, res, err := svc.MergeSuppliers(ctx, master.ID, dup.ID)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if res.QualsAdded != 0 {
+		t.Errorf("QualsAdded = %d, want 0 (same cert line, enriched in place)", res.QualsAdded)
+	}
+	if len(merged.Qualifications) != 1 {
+		t.Fatalf("qualifications = %d, want 1 merged line", len(merged.Qualifications))
+	}
+	q := merged.Qualifications[0]
+	if q.CertNo != "D133012345" || q.Expiry != "2027-06-30" ||
+		q.Issuer != "浙江省住建厅" || !q.Verified {
+		t.Errorf("master qual not enriched from duplicate: %+v", q)
+	}
+
+	// Two DIFFERENT certificate numbers of the same type+level stay
+	// separate lines (re-issued/new physical cert must not collapse).
+	dup2In := namedInput("资质主体一分公司", "91330100MA27X4003C", "杭州")
+	dup2In.Qualifications = []domain.Qualification{{
+		Type: "建筑工程施工总承包", Level: "一级", CertNo: "D299999999",
+	}}
+	dup2, _ := svc.Create(ctx, dup2In)
+	merged2, res2, err := svc.MergeSuppliers(ctx, master.ID, dup2.ID)
+	if err != nil {
+		t.Fatalf("second merge: %v", err)
+	}
+	if res2.QualsAdded != 1 || len(merged2.Qualifications) != 2 {
+		t.Errorf("distinct cert numbers must both survive: added=%d quals=%+v",
+			res2.QualsAdded, merged2.Qualifications)
+	}
+}

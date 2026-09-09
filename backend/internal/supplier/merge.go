@@ -86,13 +86,19 @@ func (s *Service) MergeSuppliers(ctx context.Context, masterID, duplicateID stri
 		}
 	}
 
-	// Qualifications: same type+cert number (or type+level when no cert no)
-	// counts as already present.
+	// Qualifications: same cert number (both sides numbered), or same
+	// type+level when at least one side lacks a number, counts as the same
+	// certificate. When the duplicate carries a cert number / dates the
+	// master record lacks, fill the empty fields in place — dropping the
+	// numbered copy outright would lose the cert number and its expiry (the
+	// 90/30/7-day reminders key off it). Master values always win conflicts.
 	for _, q := range dup.Qualifications {
-		if !qualPresent(master.Qualifications, q) {
-			master.Qualifications = append(master.Qualifications, q)
-			res.QualsAdded++
+		if idx := qualIndex(master.Qualifications, q); idx >= 0 {
+			enrichQualification(&master.Qualifications[idx], q)
+			continue
 		}
+		master.Qualifications = append(master.Qualifications, q)
+		res.QualsAdded++
 	}
 
 	// Product/service lines: union by name.
@@ -215,24 +221,61 @@ func stringSet(xs []string) map[string]bool {
 	return m
 }
 
-func qualPresent(existing []domain.Qualification, q domain.Qualification) bool {
-	for _, e := range existing {
-		// Prefer the certificate number when both sides have one; fall back
-		// to type+level for certs recorded without a number.
+// qualIndex returns the index of the qualification in existing that is the
+// same certificate as q, or -1. When both carry a certificate number only an
+// equal (case-insensitive) number matches; with fewer than two numbers the
+// fallback is same type+level (an unnumbered record of a later-numbered cert
+// still represents the same qualification line).
+func qualIndex(existing []domain.Qualification, q domain.Qualification) int {
+	for i, e := range existing {
 		if strings.TrimSpace(q.CertNo) != "" && strings.TrimSpace(e.CertNo) != "" {
 			if strings.EqualFold(strings.TrimSpace(e.CertNo), strings.TrimSpace(q.CertNo)) {
-				return true
+				return i
 			}
 			continue
 		}
 		if strings.TrimSpace(e.Type) == strings.TrimSpace(q.Type) &&
 			strings.TrimSpace(e.Level) == strings.TrimSpace(q.Level) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
+}
+
+// enrichQualification fills empty fields of a master qualification from the
+// duplicate's matching record (cert number, issuer, dates, verified flag).
+// Existing master values always win; this only prevents losing data the
+// master never recorded — especially the expiry driving renewal reminders.
+func enrichQualification(master *domain.Qualification, dup domain.Qualification) {
+	if strings.TrimSpace(master.CertNo) == "" {
+		master.CertNo = strings.TrimSpace(dup.CertNo)
+	}
+	if strings.TrimSpace(master.Issuer) == "" {
+		master.Issuer = strings.TrimSpace(dup.Issuer)
+	}
+	if strings.TrimSpace(master.IssueDate) == "" {
+		master.IssueDate = strings.TrimSpace(dup.IssueDate)
+	}
+	if strings.TrimSpace(master.Expiry) == "" {
+		master.Expiry = strings.TrimSpace(dup.Expiry)
+	}
+	if !master.Verified && dup.Verified {
+		master.Verified = true
+	}
 }
 
 func perfKey(p domain.Performance) string {
-	return strings.TrimSpace(p.Project) + "|" + strings.TrimSpace(p.Date)
+	project := strings.TrimSpace(p.Project)
+	date := strings.TrimSpace(p.Date)
+	if project != "" || date != "" {
+		return project + "|" + date
+	}
+	// Score-only records are legal (validation only bounds the scores), so an
+	// empty project+date cannot be the identity: distinct evaluations without
+	// a project name would all collapse onto "|" and be silently dropped on
+	// merge. Fall back to a content fingerprint — different scores/feedback
+	// survive, byte-identical double entries still dedup (keeps a retried
+	// merge idempotent).
+	return fmt.Sprintf("anon|score=%g|delivery=%g|quality=%g|cooperation=%g|feedback=%s",
+		p.Score, p.Delivery, p.Quality, p.Cooperation, strings.TrimSpace(p.Feedback))
 }
