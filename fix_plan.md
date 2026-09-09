@@ -48,6 +48,17 @@ linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M 
 
 **唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。
 
+### 2026-09-09：srm-mcp 默认数据目录解析加测试，锁死"与桌面 App 同库"
+
+SETUP.md 承诺独立运行的 srm-mcp 缺省读写桌面 App 的同一个 per-user 库。核查 cmd/srm-mcp 的
+defaultAppDataDir：Linux=$XDG_DATA_HOME/com.supplider.desktop（空则 ~/.local/share/…），
+macOS=~/Library/Application Support/…（os.UserConfigDir），Windows=%APPDATA%\\…，与 Tauri
+app_data_dir（按 tauri.conf.json identifier 派生）三平台一致；identifier 常量与配置同为
+com.supplider.desktop。漂移会静默打开一个空库却声称共享数据，此前无测试。新增
+cmd/srm-mcp/main_test.go：XDG 分支与 HOME fallback 两例 + identifier 必须等于
+com.supplider.desktop（防 tauri.conf.json 改名时此处漏改导致两库分离）。macOS/Windows 走
+UserConfigDir 无法在本机注入，靠代码走查+文档对齐。Go 双 tag 全量绿、三 tier 编译、vet/fmt 净。
+
 ### 2026-09-09：坐实 SQLite 多进程并发写（sidecar 与 MCP 同库）
 
 SETUP.md 承诺"App 开着 srm-mcp 也能并发读写（SQLite WAL 多进程安全）"。核查 DSN 配置正确：
