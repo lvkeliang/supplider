@@ -445,3 +445,35 @@ func TestFTSBackfillOnReopen(t *testing.T) {
 		t.Errorf("after reopen keyword = %v, want [sup_bf_1]", ids)
 	}
 }
+
+// TestFTSPathologicalKeywordsNeverErrors pins the phrase-quoting guarantee:
+// raw user input containing FTS5 syntax characters (", *, parens, boolean
+// operators, colons, LIKE wildcards) must never make the MATCH expression
+// raise a syntax error (which would 500 the list/search endpoint). Terms are
+// bound as double-quoted phrases; an unmatchable phrase just yields zero rows.
+func TestFTSPathologicalKeywordsNeverErrors(t *testing.T) {
+	st := ftsStore(t)
+	ctx := context.Background()
+	putSupplier(t, st, "sup_ftsp", "杭州混凝土有限公司", func(d *domain.Supplier) {
+		d.BasicInfo.Region = domain.Region{Province: "浙江", City: "杭州"}
+	})
+
+	for _, kw := range []string{
+		`"`, `*`, `**`, `(`, `)`, `()`, `a"b`, `杭"州`, `杭州"混凝土`,
+		`OR`, `NEAR`, `AND NOT`, `杭州 OR`, `"杭州`, `杭州"`, `%`, `_`,
+		`a*`, `:`, `[`, `{`, `\`, `混"凝"土`, "a\tb", `a:b`,
+	} {
+		_, err := st.List(ctx, datamodel.Query{
+			Filter: datamodel.SupplierFilter{Keyword: kw},
+			Limit:  10,
+		})
+		if err != nil {
+			t.Errorf("keyword %q made List fail: %v", kw, err)
+		}
+	}
+
+	// The same quoting must not break a normal long-term search.
+	if ids := searchIDs(t, st, "混凝土"); len(ids) != 1 || ids[0] != "sup_ftsp" {
+		t.Errorf("normal keyword after pathological probes = %v", ids)
+	}
+}
