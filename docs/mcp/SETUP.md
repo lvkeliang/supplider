@@ -85,7 +85,7 @@ cd backend && CGO_ENABLED=0 go build -tags personal -o srm-mcp ./cmd/srm-mcp
 - macOS：`~/Library/Application Support/Claude/claude_desktop_config.json`
 
 编辑后**重启 Claude Desktop**；在对话窗口右下角工具图标里应能看到
-`supplider` 及其 10 个工具。故障排查：Claude Desktop 的 MCP 日志在
+`supplider` 及其 11 个工具。故障排查：Claude Desktop 的 MCP 日志在
 `~/Library/Logs/Claude/mcp*.log`（macOS）/`%APPDATA%\Claude\Logs\`（Windows）。
 
 ### Cursor

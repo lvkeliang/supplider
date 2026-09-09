@@ -36,7 +36,7 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 
 | 工具 | 作用 | 关键参数 |
 | --- | --- | --- |
-| `search_suppliers` | 中文全文/拼音/同义词搜索 + 多维筛选；`q` 留空即列出首页 | `q, province, city, category, min_qual_level, min_rating, include_archived, limit` |
+| `search_suppliers` | 中文全文/拼音/同义词搜索 + 多维筛选；`q` 留空即列出首页 | `q, province, city, district, category, min_qual_level, min_rating, include_archived, limit` |
 | `get_supplier` | 读取完整文档式档案（基本信息/资质/品类/产品/绩效/风险/自定义字段/附件/变更记录） | `id` |
 | `add_supplier` | 录入供应商（必填 `company_name, province, city`）；录入前自动查重，命中会在结果中给出重复警告（不阻断） | 见工具 schema |
 | `find_duplicates` | 录入前查重：按信用代码(确凿)/公司名(疑似)/名称相近(近似：简称全称包含、同拼音、一字之差，同省才提示)找可能重复的供应商（含黑名单/归档）；建议 add 前先调用。`possible` 仅低置信度参考，不得当作同一主体处置 | `name?`, `credit_code?`, `province?`, `city?` |
@@ -49,6 +49,12 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 | `list_notifications` | 变更通知（只读）：用户**关注**的供应商出现空壳风险/被列入黑名单/归档/合并/资质临期时的通知，含未读总数。可据此提醒用户；关注/取消关注与处置请用 CLI/界面 | `unread_only?`, `limit?` |
 
 供应商 id 形如 `sup_2026_XXXXXX`，由 `search_suppliers` / `add_supplier` 返回。
+
+> **`min_qual_level` 取值**：只接受固定七个等级标签——`特级 / 一级 / 二级 / 三级`
+> （施工类）或 `甲级 / 乙级 / 丙级`（设计咨询类）；传其他写法（如 `1级`、`肆级`）会返回
+> 可纠正的参数错误，而**不会**被当成"不限等级"。留空/不传表示不做资质硬过滤。
+
+
 
 > **本地优先排序**：用户在设置页或 `srm-cli preference` 配置常驻地域（如 浙江·杭州）后，
 > `search_suppliers` 与列表结果中本地供应商自动排最前——**仅排序，外地供应商不会被筛掉**。
