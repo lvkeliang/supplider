@@ -145,6 +145,28 @@ CREATE TABLE IF NOT EXISTS settings (
     value      TEXT NOT NULL,
     updated_at TEXT NOT NULL
 ) WITHOUT ROWID;
+
+-- In-app notifications for followed suppliers (关注/变更推送). Separate
+-- from supplier documents so archiving/merging never loses feed history.
+-- Additive IF NOT EXISTS migrates old files without a version bump (same
+-- approach as settings). The partial unique index makes dedup keys
+-- collapse on insert; discrete events store '' and always insert.
+CREATE TABLE IF NOT EXISTS notifications (
+    id            TEXT PRIMARY KEY,
+    supplier_id   TEXT NOT NULL DEFAULT '',
+    supplier_name TEXT NOT NULL DEFAULT '',
+    type          TEXT NOT NULL,
+    severity      TEXT NOT NULL DEFAULT 'info',
+    title         TEXT NOT NULL,
+    body          TEXT NOT NULL DEFAULT '',
+    dedup_key     TEXT NOT NULL DEFAULT '',
+    is_read       INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread  ON notifications(is_read, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedup
+    ON notifications(dedup_key) WHERE dedup_key <> '';
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("sqlite: migrate: %w", err)
@@ -438,6 +460,10 @@ func buildWhere(f datamodel.SupplierFilter) ([]string, []any) {
 		add("s.status = ?", f.Status)
 	} else if !f.IncludeArchived {
 		add("s.status != ?", domain.StatusArchived)
+	}
+	if f.WatchedOnly {
+		// Follow flag lives in the JSON document (low-frequency filter).
+		add("json_extract(s.doc, '$.watched') = 1")
 	}
 
 	if f.Province != "" {

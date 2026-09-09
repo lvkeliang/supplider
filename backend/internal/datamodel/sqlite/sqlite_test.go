@@ -41,6 +41,45 @@ func TestInMemoryStoreContract(t *testing.T) {
 	})
 }
 
+// TestNotificationStoreContract runs the shared NotificationStore suite
+// against a file-backed SQLite store.
+func TestNotificationStoreContract(t *testing.T) {
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "supplider.db"))
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	contract.RunNotificationStoreTests(t, st)
+}
+
+// TestNotificationPersistsAcrossReopen guards the additive notifications
+// table on an old/new database (no schema-version bump).
+func TestNotificationPersistsAcrossReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "supplider.db")
+	st, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.AddNotification(ctx, datamodel.Notification{
+		ID: "p1", Type: datamodel.NotifBlacklisted, Title: "persist",
+		CreatedAt: time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st2, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st2.Close()
+	got, err := st2.ListNotifications(ctx, datamodel.NotificationQuery{Limit: 10})
+	if err != nil || len(got) != 1 || got[0].ID != "p1" {
+		t.Fatalf("notification must survive reopen: got=%v err=%v", got, err)
+	}
+}
+
 // TestPersistenceAcrossReopen is SQLite-specific value: a document written
 // to the file must survive Close + reopen with all structured and free-form
 // fields intact (this is what makes personal-tier data durable).

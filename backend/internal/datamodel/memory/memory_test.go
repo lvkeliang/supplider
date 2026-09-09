@@ -16,3 +16,8 @@ func TestSupplierStoreContract(t *testing.T) {
 		return memory.New()
 	})
 }
+
+// TestNotificationStoreContract runs the shared NotificationStore suite.
+func TestNotificationStoreContract(t *testing.T) {
+	contract.RunNotificationStoreTests(t, memory.New())
+}

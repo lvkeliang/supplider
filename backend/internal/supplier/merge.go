@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
 )
 
@@ -187,6 +188,17 @@ func (s *Service) MergeSuppliers(ctx context.Context, masterID, duplicateID stri
 	if err := s.store.Delete(ctx, duplicateID); err != nil {
 		return nil, MergeResult{}, err
 	}
+
+	// Followers of the master learn it absorbed a duplicate; followers of
+	// the (now archived) duplicate learn where their record went.
+	s.notify(ctx, master, datamodel.NotifMerged, datamodel.SeverityInfo,
+		"关注供应商合并了重复档案",
+		fmt.Sprintf("已将重复档案「%s」并入本供应商（绩效 %d、资质 %d、附件 %d 条）",
+			dup.BasicInfo.CompanyName, res.PerformanceAdded, res.QualsAdded, res.AttachmentsAdded), "")
+	s.notify(ctx, dup, datamodel.NotifMergedAway, datamodel.SeverityWarning,
+		"关注供应商已并入其他档案并归档",
+		fmt.Sprintf("该供应商已并入「%s」（%s）并归档，历史仍可查",
+			master.BasicInfo.CompanyName, master.ID), "")
 
 	return master, res, nil
 }

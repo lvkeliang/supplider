@@ -102,6 +102,11 @@ type SupplierFilter struct {
 	// IncludeArchived includes archived documents in results.
 	IncludeArchived bool
 
+	// WatchedOnly restricts to suppliers the user follows (关注). Read from
+	// the document's watched flag — a low-frequency personal view, so it is
+	// not a denormalized hot column.
+	WatchedOnly bool
+
 	// Keyword is a free-text hint. Structured stores may ignore it
 	// (full-text search belongs to the search.Index port); adapters that
 	// lack a separate index — e.g. memory — may do simple substring

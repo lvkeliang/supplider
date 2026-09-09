@@ -56,6 +56,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		text, ferr = s.toolBlacklist(ctx, args)
 	case "visibility_violations":
 		text, ferr = s.toolVisibility(ctx, args)
+	case "list_notifications":
+		text, ferr = s.toolNotifications(ctx, args)
 	default:
 		return nil, &rpcError{Code: errMethodNotFound, Message: "unknown tool: " + p.Name}
 	}
@@ -245,6 +247,30 @@ func (s *Server) toolExpiring(ctx context.Context, args json.RawMessage) (string
 	}
 	out := map[string]any{"within_days": a.Within, "count": len(alerts), "expired": expired, "items": alerts}
 	return fmt.Sprintf("%d 项资质需要处理（其中 %d 项已过期）：\n%s", len(alerts), expired, pretty(out)), nil
+}
+
+func (s *Server) toolNotifications(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		UnreadOnly bool `json:"unread_only"`
+		Limit      int  `json:"limit"`
+	}
+	decodeArgs(args, &a)
+	if a.Limit <= 0 {
+		a.Limit = 20
+	}
+	items, err := s.svc.ListNotifications(ctx, datamodel.NotificationQuery{UnreadOnly: a.UnreadOnly, Limit: a.Limit})
+	if err != nil {
+		return "", err
+	}
+	unread, err := s.svc.CountUnreadNotifications(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(items) == 0 {
+		return fmt.Sprintf("暂无通知（未读 %d）。", unread), nil
+	}
+	out := map[string]any{"unread": unread, "count": len(items), "items": items}
+	return fmt.Sprintf("%d 条未读，列出 %d 条变更通知：\n%s", unread, len(items), pretty(out)), nil
 }
 
 func (s *Server) toolShellQueue(ctx context.Context) (string, error) {

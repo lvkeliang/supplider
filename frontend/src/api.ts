@@ -10,6 +10,7 @@ import type {
   Inspection,
   LocalPreference,
   MergeResult,
+  NotificationsResponse,
   Page,
   RestoreStatus,
   RiskReport,
@@ -67,6 +68,8 @@ export interface ListParams {
   owner?: string
   status?: string
   include_archived?: boolean
+  /** Only followed (关注) suppliers. */
+  watched?: boolean
   sort?: string
   order?: 'asc' | 'desc'
   limit?: number
@@ -151,6 +154,7 @@ export const api = {
         owner: p.owner,
         status: p.status,
         include_archived: p.include_archived,
+        watched: p.watched,
         sort: p.sort,
         order: p.order,
         limit: p.limit,
@@ -159,6 +163,25 @@ export const api = {
         prefer: p.localFirst === false ? '0' : undefined,
       }),
     ),
+
+  // Follow / unfollow a supplier (关注). Watching writes no change_log and
+  // does not reorder lists; watched suppliers raise change notifications.
+  watchSupplier: (id: string, watched: boolean) =>
+    request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/watch`, { watched }),
+
+  // Change-notification feed (变更推送通知关注者).
+  notifications: (unreadOnly = false) =>
+    request<NotificationsResponse>(
+      'GET',
+      withQuery('/api/v1/notifications', {
+        unread: unreadOnly ? true : undefined,
+        limit: 50,
+      }),
+    ),
+  markNotificationRead: (id: string) =>
+    request<{ ok: boolean }>('POST', `/api/v1/notifications/${encodeURIComponent(id)}/read`),
+  markAllNotificationsRead: () =>
+    request<{ ok: boolean }>('POST', '/api/v1/notifications/read-all'),
 
   // Download URL for exporting the current filter view. `format` is 'json'
   // (full-fidelity backup bundle) or 'xlsx' (exchange workbook). The server

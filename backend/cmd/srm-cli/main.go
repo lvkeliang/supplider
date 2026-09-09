@@ -86,6 +86,12 @@ func main() {
 		err = cmdBlacklist(args, true)
 	case "unblacklist":
 		err = cmdBlacklist(args, false)
+	case "watch":
+		err = cmdWatch(args, true)
+	case "unwatch":
+		err = cmdWatch(args, false)
+	case "notifications", "notif":
+		err = cmdNotifications(args)
 	case "duplicates", "dedup":
 		err = cmdDuplicates(args)
 	case "merge":
@@ -125,6 +131,10 @@ Usage:
   srm-cli restore <备份.zip>        校验并暂存恢复包，完全退出并重启应用后生效（当前数据自动保留回退副本）
   srm-cli restore-cancel            取消已暂存、尚未生效的恢复包
   srm-cli compare <id> <id>... [--criteria price,delivery,qual]
+  srm-cli watch <id> / srm-cli unwatch <id>
+                                 关注/取消关注：关注后该供应商风险/黑名单/归档/资质临期会进通知
+  srm-cli notifications [--unread] [--all-read] [--json]
+                                 查看变更通知（铃铛）；--all-read 全部标记已读；list/search 可加 --watched
   srm-cli expiring [--within N] [--json]
                                  资质到期提醒：列出已过期/7 天内/30 天内/90 天内到期的资质
   srm-cli risk [id] [--json]
@@ -183,6 +193,7 @@ type filterFlags struct {
 	preferProvince string
 	preferCity     string
 	noLocal        bool
+	watched        bool
 }
 
 func bindFilterFlags(fs *flag.FlagSet) *filterFlags {
@@ -200,6 +211,7 @@ func bindFilterFlags(fs *flag.FlagSet) *filterFlags {
 	fs.StringVar(&f.preferProvince, "prefer-province", "", "rank this province's suppliers first (overrides saved preference)")
 	fs.StringVar(&f.preferCity, "prefer-city", "", "rank this city's suppliers first (with --prefer-province)")
 	fs.BoolVar(&f.noLocal, "no-local", false, "disable the saved home-region ranking for this query")
+	fs.BoolVar(&f.watched, "watched", false, "only followed (关注) suppliers")
 	return f
 }
 
@@ -221,6 +233,9 @@ func (f *filterFlags) apply(q url.Values) {
 	set("prefer_city", f.preferCity)
 	if f.noLocal {
 		q.Set("prefer", "0")
+	}
+	if f.watched {
+		q.Set("watched", "true")
 	}
 	if f.minRating > 0 {
 		q.Set("min_rating", fmt.Sprintf("%g", f.minRating))
@@ -1153,6 +1168,137 @@ func cmdBlacklist(args []string, add bool) error {
 		fmt.Printf("unblacklisted %s  %s → 已移出黑名单，恢复在库。\n", doc.ID, doc.BasicInfo.CompanyName)
 	}
 	return nil
+}
+
+// ---------- watch / notifications (关注 / 变更通知) ----------
+
+// cmdWatch follows (add=true) or unfollows a supplier.
+func cmdWatch(args []string, add bool) error {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		return fmt.Errorf("watch requires a supplier id")
+	}
+	id := fs.Arg(0)
+	b, _ := json.Marshal(map[string]bool{"watched": add})
+	req, _ := http.NewRequest(http.MethodPost,
+		apiBase()+"/api/v1/suppliers/"+url.PathEscape(id)+"/watch", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var doc domain.Supplier
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return err
+	}
+	if add {
+		fmt.Printf("watching %s  %s → 已关注（变更将进通知）。\n", doc.ID, doc.BasicInfo.CompanyName)
+	} else {
+		fmt.Printf("unwatched %s  %s → 已取消关注。\n", doc.ID, doc.BasicInfo.CompanyName)
+	}
+	return nil
+}
+
+// cliNotification mirrors datamodel.Notification.
+type cliNotification struct {
+	ID           string `json:"id"`
+	SupplierID   string `json:"supplier_id"`
+	SupplierName string `json:"supplier_name"`
+	Type         string `json:"type"`
+	Severity     string `json:"severity"`
+	Title        string `json:"title"`
+	Body         string `json:"body"`
+	Read         bool   `json:"read"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type notificationsPayload struct {
+	Unread int               `json:"unread"`
+	Items  []cliNotification `json:"items"`
+}
+
+// cmdNotifications lists the change-notification feed, optionally marks all
+// read. --unread shows only unread; --json emits the raw payload.
+func cmdNotifications(args []string) error {
+	fs := flag.NewFlagSet("notifications", flag.ContinueOnError)
+	unreadOnly := fs.Bool("unread", false, "show only unread notifications")
+	allRead := fs.Bool("all-read", false, "mark every notification read, then exit")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+
+	if *allRead {
+		resp, err := http.Post(apiBase()+"/api/v1/notifications/read-all", "application/json", nil)
+		if err != nil {
+			return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return decodeAPIError(resp)
+		}
+		fmt.Fprintln(os.Stderr, "all notifications marked read.")
+		return nil
+	}
+
+	q := url.Values{}
+	if *unreadOnly {
+		q.Set("unread", "true")
+	}
+	q.Set("limit", "100")
+	resp, err := http.Get(apiBase() + "/api/v1/notifications?" + q.Encode())
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var payload notificationsPayload
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return err
+	}
+	if *asJSON {
+		return json.NewEncoder(os.Stdout).Encode(payload)
+	}
+	fmt.Fprintf(os.Stderr, "%d 条未读，共 %d 条通知\n", payload.Unread, len(payload.Items))
+	if len(payload.Items) == 0 {
+		fmt.Fprintln(os.Stderr, "(暂无通知)")
+		return nil
+	}
+	for _, n := range payload.Items {
+		mark := "●"
+		if n.Read {
+			mark = " "
+		}
+		ts := n.CreatedAt
+		if t, err := time.Parse(time.RFC3339, n.CreatedAt); err == nil {
+			ts = t.Local().Format("01-02 15:04")
+		}
+		fmt.Printf("%s [%s] %s  %s — %s\n", mark, ts, notifSeverityLabel(n.Severity), n.SupplierName, n.Title)
+		if n.Body != "" {
+			fmt.Printf("    %s\n", n.Body)
+		}
+	}
+	return nil
+}
+
+func notifSeverityLabel(s string) string {
+	switch s {
+	case "danger":
+		return "严重"
+	case "warning":
+		return "警告"
+	default:
+		return "信息"
+	}
 }
 
 // ---------- duplicates (录入去重) ----------

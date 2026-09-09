@@ -120,9 +120,34 @@ export interface Supplier {
   attachments?: Attachment[]
   rating?: number
   blacklist_reason?: string
+  /** Current user follows this supplier (关注): changes raise notifications. */
+  watched?: boolean
   created_at: string
   updated_at: string
   archived_at?: string
+}
+
+// ---- Watch + notifications (关注 / 变更推送通知) ----
+
+export type NotificationSeverity = 'info' | 'warning' | 'danger' | string
+
+/** One in-app alert about a followed supplier. */
+export interface SupplierNotification {
+  id: string
+  supplier_id: string
+  supplier_name: string
+  type: string
+  severity: NotificationSeverity
+  title: string
+  body?: string
+  dedup_key?: string
+  read: boolean
+  created_at: string
+}
+
+export interface NotificationsResponse {
+  unread: number
+  items: SupplierNotification[]
 }
 
 /** List-page projection (summary fields only — performance red line). */
@@ -142,6 +167,8 @@ export interface SupplierSummary {
   risk_reviewed?: boolean
   /** Record is 待调整 under a tightened visibility policy (buffer running). */
   vis_pending?: boolean
+  /** Current user follows this supplier (关注) — changes raise notifications. */
+  watched?: boolean
   updated_at: string
 }
 

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
 )
 
@@ -53,6 +54,12 @@ func (s *Service) Blacklist(ctx context.Context, id, reason string) (*domain.Sup
 	if err := s.store.Put(ctx, doc); err != nil {
 		return nil, err
 	}
+	body := "该供应商已被列入黑名单，请勿选用"
+	if reason != "" {
+		body = "该供应商已被列入黑名单，请勿选用。原因：" + reason
+	}
+	s.notify(ctx, doc, datamodel.NotifBlacklisted, datamodel.SeverityDanger,
+		"关注供应商已列入黑名单", body, "")
 	return doc, nil
 }
 
@@ -77,5 +84,7 @@ func (s *Service) Unblacklist(ctx context.Context, id string) (*domain.Supplier,
 	if err := s.store.Put(ctx, doc); err != nil {
 		return nil, err
 	}
+	s.notify(ctx, doc, datamodel.NotifUnblacklisted, datamodel.SeverityInfo,
+		"关注供应商已移出黑名单", "该供应商已恢复为正常在库状态", "")
 	return doc, nil
 }

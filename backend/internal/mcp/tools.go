@@ -152,5 +152,13 @@ func toolDefs() []map[string]any {
 				},
 			}, "ids"),
 		},
+		{
+			"name":        "list_notifications",
+			"description": "查看变更通知（关注的供应商出现空壳风险/被列入黑名单/归档/合并/资质临期等）。只读：返回通知列表与未读总数，Agent 可据此提醒用户，但不代替用户做处置。",
+			"inputSchema": schema(map[string]any{
+				"unread_only": map[string]any{"type": "boolean", "description": "true 时仅返回未读，默认 false"},
+				"limit":       map[string]any{"type": "integer", "description": "最多返回条数，默认 20，上限 100"},
+			}),
+		},
 	}
 }

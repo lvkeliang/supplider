@@ -23,16 +23,22 @@ import (
 // Service implements the supplier lifecycle use cases.
 type Service struct {
 	store datamodel.SupplierStore
-	now   func() time.Time // injectable for tests
-	newID func() string    // injectable for tests; defaults to domain.NewSupplierID
+	// notifs raises in-app alerts for followed suppliers. It is the same
+	// concrete store (memory/sqlite implement both ports); nil when a store
+	// offers no feed, in which case watch notifications silently no-op.
+	notifs datamodel.NotificationStore
+	now    func() time.Time // injectable for tests
+	newID  func() string    // injectable for tests; defaults to domain.NewSupplierID
 }
 
 // NewService wires the service to a store.
 func NewService(store datamodel.SupplierStore) *Service {
+	notifs, _ := store.(datamodel.NotificationStore)
 	return &Service{
-		store: store,
-		now:   func() time.Time { return time.Now().UTC() },
-		newID: domain.NewSupplierID,
+		store:  store,
+		notifs: notifs,
+		now:    func() time.Time { return time.Now().UTC() },
+		newID:  domain.NewSupplierID,
 	}
 }
 
@@ -222,10 +228,18 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*domai
 	// If the edit touches fields the rule engine reads, a prior human
 	// clearance no longer applies — reopen the review before re-evaluating.
 	reopenRiskReviewIfNeeded(doc, changes)
+	wasRisk := doc.RiskFlags.ShellRisk
 	s.applyRisk(doc) // 资料变更后重新跑空壳规则
 
 	if err := s.store.Put(ctx, doc); err != nil {
 		return nil, err
+	}
+	// A NEW shell-risk verdict on a followed supplier raises an alert; a
+	// risk clearing or an unchanged verdict does not.
+	if doc.Watched && !wasRisk && doc.RiskFlags.ShellRisk {
+		s.notify(ctx, doc, datamodel.NotifRiskFlagged, datamodel.SeverityDanger,
+			"关注供应商出现空壳风险信号",
+			"资料变更后规则引擎新判定为空壳风险，请查看风险检测并核验原件", "")
 	}
 	return doc, nil
 }
@@ -306,7 +320,12 @@ func (s *Service) Archive(ctx context.Context, id string) error {
 	if err := s.store.Put(ctx, doc); err != nil {
 		return err
 	}
-	return s.store.Delete(ctx, id) // adapter sets archived status + timestamp
+	if err := s.store.Delete(ctx, id); err != nil { // adapter sets archived status + timestamp
+		return err
+	}
+	s.notify(ctx, doc, datamodel.NotifArchived, datamodel.SeverityInfo,
+		"关注供应商已归档", "该供应商被归档（保留历史，默认列表不再显示）", "")
+	return nil
 }
 
 // Restore un-archives a supplier.
@@ -328,6 +347,8 @@ func (s *Service) Restore(ctx context.Context, id string) (*domain.Supplier, err
 	if err := s.store.Put(ctx, doc); err != nil {
 		return nil, err
 	}
+	s.notify(ctx, doc, datamodel.NotifRestored, datamodel.SeverityInfo,
+		"关注供应商已恢复", "该供应商已从归档恢复，重新进入正常列表", "")
 	return doc, nil
 }
 

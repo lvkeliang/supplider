@@ -46,6 +46,7 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 | `compare_suppliers` | 多家供应商并排对比（地域/品类/最高资质/评分/绩效/风险） | `ids[]`（≥2） |
 | `blacklist_supplier` | 淘汰阶段：列入黑名单（`remove:false` + `reason`，仍可搜到但醒目标记禁用）或移出（`remove:true`） | `id`, `reason?`, `remove?` |
 | `visibility_violations` | 可见性策略收紧扫描（只读）：列出可见范围超出最高允许等级的在库供应商，含处置状态（待调整/申诉中/已超期）与剩余天数。用于提醒录入者调整或申诉；**标记/降级/申诉裁决由管理员执行，Agent 不自动处置** | `max_level?`（默认取管理员已保存的策略，未配置时个人版=1） |
+| `list_notifications` | 变更通知（只读）：用户**关注**的供应商出现空壳风险/被列入黑名单/归档/合并/资质临期时的通知，含未读总数。可据此提醒用户；关注/取消关注与处置请用 CLI/界面 | `unread_only?`, `limit?` |
 
 供应商 id 形如 `sup_2026_XXXXXX`，由 `search_suppliers` / `add_supplier` 返回。
 

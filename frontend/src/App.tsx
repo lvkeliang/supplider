@@ -7,6 +7,7 @@ import { SupplierDetail } from './components/SupplierDetail'
 import { ImportView } from './components/ImportView'
 import { SettingsView } from './components/SettingsView'
 import { CompareView } from './components/CompareView'
+import { NotificationBell } from './components/NotificationBell'
 
 // Minimal in-app router (no extra dependency): the desktop MVP has a handful
 // of screens. Tauri/web history is not needed for the seed milestone.
@@ -52,6 +53,8 @@ export default function App() {
           </button>
           <span className="text-sm text-slate-400">供应商资源管理</span>
           <div className="ml-auto flex items-center gap-2">
+            {/* 变更通知：关注供应商的风险/黑名单/归档/资质临期提醒。 */}
+            <NotificationBell go={go} />
             {/* 管理设置：可见性策略等管理员配置（个人版单用户即管理员）。 */}
             <button
               onClick={() => go({ name: 'settings' })}

@@ -112,6 +112,7 @@ export function SupplierList({ go }: { go: Go }) {
     params.min_qual_level,
     params.min_rating,
     params.include_archived,
+    params.watched,
     params.localFirst,
   ])
 
@@ -198,6 +199,14 @@ export function SupplierList({ go }: { go: Go }) {
               onChange={(e) => set({ include_archived: e.target.checked || undefined })}
             />
             显示已归档
+          </label>
+          <label className="flex items-center gap-1" title="只看我关注的供应商（风险/黑名单/资质临期会进铃铛通知）">
+            <input
+              type="checkbox"
+              checked={!!params.watched}
+              onChange={(e) => set({ watched: e.target.checked || undefined })}
+            />
+            ★ 仅看关注
           </label>
           {pref?.configured && (
             <label className="flex items-center gap-1" title={`本地供应商（${[pref.province, pref.city].filter(Boolean).join(' · ')}）排最前，仅排序不筛选`}>
@@ -332,6 +341,14 @@ export function SupplierList({ go }: { go: Go }) {
                 onChange={(e) => toggleSelected(s.id, e.target.checked)}
               />
               <span className="font-medium text-slate-800">{s.name}</span>
+              {s.watched && (
+                <span
+                  className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
+                  title="我关注的供应商：风险/黑名单/归档/资质临期会进铃铛通知"
+                >
+                  ★ 已关注
+                </span>
+              )}
               {localOn && isLocal(s) && (
                 <span
                   className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700"

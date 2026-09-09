@@ -137,6 +137,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/restore", s.handleRestore)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/blacklist", s.handleBlacklist)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/unblacklist", s.handleUnblacklist)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/watch", s.handleWatch)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/merge", s.handleMerge)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/{id}/risk", s.handleSupplierRisk)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-check", s.handleRiskCheck)
@@ -150,6 +151,9 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/import/commit", s.handleImportCommit)
 	s.Mux.HandleFunc("GET /api/v1/export", s.handleExport)
 	s.Mux.HandleFunc("GET /api/v1/reminders/expiring", s.handleExpiringReminders)
+	s.Mux.HandleFunc("GET /api/v1/notifications", s.handleListNotifications)
+	s.Mux.HandleFunc("POST /api/v1/notifications/read-all", s.handleMarkAllNotificationsRead)
+	s.Mux.HandleFunc("POST /api/v1/notifications/{id}/read", s.handleMarkNotificationRead)
 	s.Mux.HandleFunc("GET /api/v1/backup", s.handleBackup)
 	s.Mux.HandleFunc("GET /api/v1/backup/restore", s.handleRestoreStatus)
 	s.Mux.HandleFunc("POST /api/v1/backup/restore", s.handleRestoreStage)
@@ -743,6 +747,7 @@ func filterFromQuery(q url.Values) datamodel.SupplierFilter {
 		VisibilityMax:   visMax,
 		Status:          q.Get("status"),
 		IncludeArchived: q.Get("include_archived") == "true" || q.Get("include_archived") == "1",
+		WatchedOnly:     q.Get("watched") == "true" || q.Get("watched") == "1",
 		Keyword:         q.Get("q"),
 		PreferProvince:  q.Get("prefer_province"),
 		PreferCity:      q.Get("prefer_city"),
@@ -1014,7 +1019,7 @@ func (s *Server) StartMaintenanceLoops(ctx context.Context) {
 			return
 		case <-time.After(5 * time.Second):
 		}
-		s.runVisibilitySweep(ctx)
+		s.runMaintenanceSweeps(ctx)
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 		for {
@@ -1022,7 +1027,7 @@ func (s *Server) StartMaintenanceLoops(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.runVisibilitySweep(ctx)
+				s.runMaintenanceSweeps(ctx)
 			}
 		}
 	}()
@@ -1050,6 +1055,34 @@ func (s *Server) runVisibilitySweep(ctx context.Context) {
 	if rep.Flagged > 0 || rep.Downgraded > 0 || rep.Resolved > 0 {
 		log.Printf("httpapi: visibility sweep (cap L%d): flagged=%d downgraded=%d resolved=%d pending=%d appealed=%d remaining=%d",
 			policy.MaxLevel, rep.Flagged, rep.Downgraded, rep.Resolved, rep.Pending, rep.Appealed, len(rep.Items))
+	}
+}
+
+// runMaintenanceSweeps runs every daily/boot background sweep: visibility
+// disposition and watched-supplier expiry notifications. Each is isolated so
+// one failure never blocks the other.
+func (s *Server) runMaintenanceSweeps(ctx context.Context) {
+	s.runVisibilitySweep(ctx)
+	s.runExpiryNotificationSweep(ctx)
+}
+
+// runExpiryNotificationSweep raises one notification per watched supplier
+// whose qualification enters a 90/30/7-day or expired window. Repeated runs
+// are idempotent (per-window dedup keys). Logged only when it raises new
+// alerts; panics are contained like the visibility sweep.
+func (s *Server) runExpiryNotificationSweep(ctx context.Context) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("httpapi: expiry notification sweep panic: %v", rec)
+		}
+	}()
+	n, err := s.Service.NotifyWatchedExpiring(ctx)
+	if err != nil {
+		log.Printf("httpapi: expiry notification sweep: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("httpapi: expiry notification sweep raised=%d", n)
 	}
 }
 

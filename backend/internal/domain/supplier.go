@@ -91,6 +91,14 @@ type Supplier struct {
 	// Cleared when the supplier is removed from the blacklist. The date and
 	// actor are in change_log.
 	BlacklistReason string `json:"blacklist_reason,omitempty"`
+
+	// Watched marks a supplier the current user follows (关注). When a
+	// watched supplier changes (risk flag, blacklist, archive, merge, a
+	// qualification nearing expiry) an in-app notification is raised. It is
+	// personal UI state — toggling it writes no change_log and does not bump
+	// UpdatedAt. The same notification payload is what enterprise pushes to
+	// 钉钉/企微; the personal tier surfaces it in an in-app bell (可降级).
+	Watched bool `json:"watched,omitempty"`
 }
 
 // BasicInfo is the fixed core of every supplier.
@@ -267,8 +275,10 @@ type Summary struct {
 	RiskReviewed bool `json:"risk_reviewed,omitempty"`
 	// VisPending mirrors vis_enforcement.pending_adjustment: the record is
 	// 待调整 under a tightened visibility policy (buffer countdown running).
-	VisPending bool      `json:"vis_pending,omitempty"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	VisPending bool `json:"vis_pending,omitempty"`
+	// Watched mirrors the follow flag for list badges / watched-only filter.
+	Watched   bool      `json:"watched,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ToSummary projects a full document onto the list-page shape.
@@ -287,6 +297,7 @@ func ToSummary(s *Supplier) Summary {
 		ShellRisk:    s.RiskFlags.ShellRisk,
 		RiskReviewed: s.RiskFlags.Reviewed,
 		VisPending:   s.VisEnforcement != nil && s.VisEnforcement.Pending,
+		Watched:      s.Watched,
 		UpdatedAt:    s.UpdatedAt,
 	}
 }

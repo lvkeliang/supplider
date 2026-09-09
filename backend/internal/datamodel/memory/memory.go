@@ -30,6 +30,7 @@ type Store struct {
 	mu       sync.RWMutex
 	docs     map[string]*domain.Supplier
 	settings map[string]string
+	notifs   []datamodel.Notification
 }
 
 // New returns an empty in-memory store.
@@ -151,6 +152,9 @@ func matchesFilter(d *domain.Supplier, f datamodel.SupplierFilter) bool {
 			return false
 		}
 	} else if !f.IncludeArchived && d.Status == domain.StatusArchived {
+		return false
+	}
+	if f.WatchedOnly && !d.Watched {
 		return false
 	}
 

@@ -135,6 +135,23 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     }
   }
 
+  // 关注：关注后该供应商出现空壳风险/被列入黑名单/归档/合并/资质临期时，
+  // 会进入顶部铃铛的变更通知。纯本地、不写 change_log、不影响列表排序。
+  const toggleWatch = async () => {
+    if (!doc) return
+    const next = !doc.watched
+    setBusy(true)
+    setError('')
+    try {
+      await api.watchSupplier(id, next)
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // 合并重复供应商：打开选择器并用当前档案的公司名/信用代码跑录入查重，把
   // 疑似同一主体的档案列出来直接挑选（当前档案保留身份，并入对方的绩效/
   // 附件/资质/品类/产品线/自定义字段，对方随后归档）。黑名单/归档记录服务端
@@ -269,6 +286,15 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
           </div>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
+          {/* 关注在归档/在库状态下都可用（归档后仍保留关注与通知历史）。 */}
+          <button
+            className={doc.watched ? 'btn-primary' : 'btn-ghost'}
+            disabled={busy}
+            onClick={toggleWatch}
+            title={doc.watched ? '取消关注：该供应商的变更不再进通知' : '关注：风险/黑名单/归档/资质临期等变更会进顶部铃铛通知'}
+          >
+            {doc.watched ? '★ 已关注' : '☆ 关注'}
+          </button>
           {archived ? (
             <button className="btn-primary" disabled={busy} onClick={restore}>恢复</button>
           ) : (

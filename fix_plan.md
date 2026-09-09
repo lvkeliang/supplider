@@ -34,6 +34,60 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：关注供应商 + 应用内变更通知铃铛（PRD 维护：变更推送通知关注者 + 资质到期提醒）
+
+关注一家供应商后，它出现空壳风险 / 被拉黑 / 移出黑名单 / 归档 / 恢复 / 合并，或资质进入
+90/30/7 天到期窗口，都会进顶栏铃铛的未读通知。纯本地、零外部依赖、无 AI；企业版日后把
+**同一个 `datamodel.Notification` payload** 扇出到钉钉/企微即可，业务代码不动（可降级原则）。
+上一轮循环在写完后端后超时，本轮：修复了前端一个导致整模块编译崩溃的语法错误并把整条
+前端链路接通，再做 HTTP+CLI+MCP+多次重启的真机 E2E，最后提交。
+
+- **数据模型端口**（业务代码只认接口，不认驱动）：`datamodel.Notification` +
+  `NotificationStore`（`AddNotification`/`ListNotifications`/`CountUnreadNotifications`/
+  `MarkNotificationRead`/`MarkAllNotificationsRead`）。通知独立成表，**归档/合并/删除供应商
+  不丢通知历史**（supplier_name 反范式化，档案没了也能渲染）。
+  - 去重：`DedupKey` 非空时同键折叠为第一条、返回 `inserted=false`；离散用户动作用空键，
+    每次都提醒。SQLite 用 **partial unique index** `(dedup_key) WHERE dedup_key<>''` 配合
+    `INSERT OR IGNORE` 实现，空键不受唯一约束；`KeepNotifications=500` 修剪最旧。
+  - 同一套契约 `datamodel/contract/notification.go` 在 memory（参考实现）与 SQLite 两适配器
+    上跑（钉住去重/最新优先/未读计数/已读语义），日后 Mongo 照跑同一套。
+- **关注态**：`domain.Supplier.Watched`。个人 UI 态——**不写 change_log、不碰 UpdatedAt、
+  不重排列表**；归档后仍可关注、关注与通知历史跨归档保留。`Summary.Watched` 出列表投影；
+  `SupplierFilter.WatchedOnly`（SQLite 走 `json_extract(doc,'$.watched')`，低频视图不做热列）。
+- **Service**（`supplier/notify.go`）：`SetWatched`（幂等）；内部 `notify` 是 **best-effort
+  副作用**——store 无 feed / 未关注即 no-op，通知失败绝不让生命周期动作失败。钩子：`Update`
+  仅在**新**空壳判定（`!wasRisk && ShellRisk`）报 danger；Blacklist（body 带原因）/Unblacklist、
+  Archive/Restore、`MergeSuppliers`（主档案"吸收了重复"+ 被并档案"已并入谁并归档"双向提醒）。
+  `NotifyWatchedExpiring` 复用既有 `ExpiringQualifications(90)`，按 90/30/7/expired 窗口给
+  severity/标题/中文正文，dedup key = `exp:<sup>:<证书身份>:<窗口>`，证书身份取 cert_no
+  否则 type|level|expiry（换发新证算新事件）；跨 90→30→7→过期各提醒一次，日扫/启动幂等。
+- **后台接线**：`httpapi.runMaintenanceSweeps` = 可见性处置 + 到期通知，启动 5s 后与每 24h
+  各跑一次，两个 sweep 互相隔离、panic recover（一个挂不挡另一个）。
+- **入口**：HTTP `POST /suppliers/{id}/watch`、`GET /notifications?unread&limit`（附总未读）、
+  `POST /notifications/read-all`、`POST /notifications/{id}/read`、列表加 `?watched=true`；
+  CLI `watch/unwatch`、`notifications [--unread] [--all-read] [--json]`、`list/search --watched`；
+  MCP 新增**只读** `list_notifications`（刻意不暴露关注/处置——与"Agent 不擅自拉黑/合并"
+  同一边界，关注与处置走 CLI/界面），skill 文档同步一行。
+- **前端（本轮补齐）**：修复 `api.ts` 中误留的 `),`（在 `markAllNotificationsRead` 之后，
+  使整个 `api` 对象语法错误、tsc 报 30+ 错、前端完全编译不过）；顶栏挂载 `NotificationBell`
+  （60s 轮询、下拉、未读红点 99+、点条目即已读并跳详情、"全部标为已读"、按 severity 出
+  🚫/⚠️/🔔）；详情页动作区加 ☆关注/★已关注（归档/在库都显示，关注跨归档）；列表行加
+  ★已关注 徽标与"★ 仅看关注"筛选；`types.ts`/`api.ts` 补类型与方法。
+- 测试：`supplier/notify_test.go` 7 例（关注不动 change_log/时间戳；黑名单只通知关注者；
+  风险仅新判定才报；归档/合并双向；watched-only 过滤；到期按窗口只报一次；到期跳过未关注）
+  + 通知 store 契约 3 例 ×两适配器。全量 default+personal 绿，personal/small_business/
+  enterprise 四 tag 编译通过，gofmt/vet 净，tsc+vite 通过（bundle 213KB）。
+- E2E（personal/SQLite，HTTP+CLI+MCP stdio+多次重启）：关注 A→拉黑 A 出一条 danger 且
+  未关注的 B 被拉黑**不**产生通知；单条已读未读清零；移出黑名单再出一条 info；
+  `?watched=true` 只回 A；`DELETE` 归档出 archived 且 A 归档后仍 watched；建 5 天后到期资质
+  的 C 并关注→重启后启动 sweep 产生**唯一**一条 7d danger（《建筑工程施工总承包二级》…仅剩 5
+  天，dedup key 带 cert 号），**再重启仍只 1 条**（幂等）；黑名单 JSON `{"reason":...}` 正确
+  进入通知正文；CLI `notifications`/`--unread --json`/`watch`/`unwatch`/`list --watched`
+  （★ 标记、归档 A 默认隐藏）/`--all-read` 全对；MCP `list_notifications` 经 SRM_DATA_DIR
+  直开 WAL 库，全量 4 条 newest-first、unread_only 正确；daemon 内嵌的新前端 bundle 实测含
+  铃铛/关注/仅看关注。注意踩坑：MCP 与 CLI 寻址不同——CLI 走 HTTP（`SRM_API_ADDR`），
+  srm-mcp 直接开数据目录（`--data-dir`/`SRM_DATA_DIR`，WAL 允许与在跑的 sidecar 并发）。
+
 ### 2026-09-09：应用内一键恢复/换机迁移（备份闭环收尾）——停应用解压覆盖不再是唯一路径
 
 备份导出早已落地，但恢复只能"停应用、手动解压覆盖数据目录"，普通桌面用户做不到。
