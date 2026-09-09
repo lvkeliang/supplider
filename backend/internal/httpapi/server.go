@@ -702,11 +702,16 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 
+	filter, err := filterFromQuery(q)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	query := datamodel.Query{
 		Limit:  limit,
 		Cursor: q.Get("cursor"),
 		Sort:   datamodel.Sort{Field: datamodel.SortField(q.Get("sort")), Order: datamodel.SortOrder(q.Get("order"))},
-		Filter: filterFromQuery(q),
+		Filter: filter,
 	}
 	// prefer=0/false/off temporarily disables the saved home-region
 	// ranking for this query (the list-page "本地优先" switch).
@@ -725,7 +730,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 
 // filterFromQuery parses the shared supplier filter parameters used by
 // both the interactive list and the export endpoint.
-func filterFromQuery(q url.Values) datamodel.SupplierFilter {
+func filterFromQuery(q url.Values) (datamodel.SupplierFilter, error) {
 	visMax := (*int)(nil)
 	if v := q.Get("visibility_max"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -734,6 +739,12 @@ func filterFromQuery(q url.Values) datamodel.SupplierFilter {
 	}
 	minQual := 0
 	if lvl := q.Get("min_qual_level"); lvl != "" {
+		// An unrecognized level must not silently disable the hard filter
+		// (QualRank returns 0 for unknown input, which means "no filter").
+		if !domain.QualRankKnown(lvl) {
+			return datamodel.SupplierFilter{}, fmt.Errorf(
+				"unrecognized min_qual_level %q (use one of: 特级/一级/二级/三级/甲级/乙级/丙级)", lvl)
+		}
 		minQual = domain.QualRank(lvl)
 	}
 	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
@@ -755,7 +766,7 @@ func filterFromQuery(q url.Values) datamodel.SupplierFilter {
 		Keyword:         q.Get("q"),
 		PreferProvince:  q.Get("prefer_province"),
 		PreferCity:      q.Get("prefer_city"),
-	}
+	}, nil
 }
 
 // ---------- maintenance reminders ----------
@@ -1417,7 +1428,12 @@ func (s *Server) handleRestoreCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
-	docs, err := s.Service.Export(r.Context(), filterFromQuery(r.URL.Query()))
+	filter, ferr := filterFromQuery(r.URL.Query())
+	if ferr != nil {
+		writeError(w, http.StatusBadRequest, ferr.Error())
+		return
+	}
+	docs, err := s.Service.Export(r.Context(), filter)
 	if err != nil {
 		writeServiceError(w, err)
 		return

@@ -102,6 +102,9 @@ func (s *Server) toolSearch(ctx context.Context, args json.RawMessage) (string, 
 		IncludeArchived: a.IncludeArchived,
 	}
 	if lvl := strings.TrimSpace(a.MinQualLevel); lvl != "" {
+		if !domain.QualRankKnown(lvl) {
+			return "", fmt.Errorf("unrecognized min_qual_level %q (use one of: 特级/一级/二级/三级/甲级/乙级/丙级)", lvl)
+		}
 		f.MinQualRank = domain.QualRank(lvl)
 	}
 

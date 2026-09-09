@@ -46,6 +46,15 @@ func QualRank(level string) int {
 	return qualRank[level]
 }
 
+// QualRankKnown reports whether level is a recognized, comparable
+// qualification level. A hard filter built on an unrecognized value
+// (typo like "肆级" / "1级") must be rejected rather than silently
+// disabling the filter (QualRank returns 0 for unknown input).
+func QualRankKnown(level string) bool {
+	_, ok := qualRank[level]
+	return ok
+}
+
 // TopQualification returns the level label and rank of the supplier's
 // highest-ranked qualification ("" / 0 when none is ranked).
 func TopQualification(s *Supplier) (level string, rank int) {
