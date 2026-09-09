@@ -32,6 +32,20 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
    ~~GitHub Releases 工作流~~ **已落地**（见下：ci.yml + release.yml；`v*` tag 自动
    产出四平台桌面安装包与五平台 CLI/MCP/daemon 二进制并附 SHA256SUMS）。
 
+## 审计覆盖现状（2026-09-09 收口）
+
+连续对个人版全部核心面做了正确性/健壮性审计并修复，每处修复都带测试：
+- 外部输入面：HTTP 错误分类（坏游标/控制字符 key/畸形策略体）、MCP panic 隔离+超长行、CLI 空白 id
+- 时间状态机：可见性处置（申诉中放宽策略记审计、驳回标签、SQLite 跨重开）、资质到期中文日期
+- 数据保全：合并（仅评分绩效折叠/证书号补空）、Excel 导入（列序确定性/未知键）、备份恢复（布局类型冲突/真实链路）、附件引用计数、Excel 导出补网址/产品列
+- 决策引擎：空壳检测（15 位旧注册号误报/资本千分位/成立日期）、去重引擎（探针确认无误）、资质等级硬过滤静默失效、列表 keyset+本地优先属性测试、FTS 病态关键词不报错、通知 dedup 两适配器一致
+- 前端：引入 vitest（查询序列化契约）、合并选择器/受控筛选读一遍无误
+
+**发布就绪验证（本机，CI 的可验证部分全部通过）**：`go test ./...` 与 `-tags personal` 全绿（13 包）；三 tier（personal/small_business/enterprise）编译+vet 干净；发布五目标交叉编译成功
+linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M / darwin-arm64 23M；前端 vitest 7/7、tsc 干净、vite build 干净（测试代码不进 bundle）；嵌入包 webui/dist 被 gitignore 由 CI build-frontend.sh 重建。
+
+**唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。侧侧器 Rust 仅在 release tag 的 CI runner 编译（本机无 Rust 工具链，见记忆 sidecar-supervision-and-ci），改动后需专门一轮加 `cargo check` 到 CI。
+
 ## 已完成
 
 ### 2026-09-09：FTS5 关键词健壮性审计——病态输入不报错，固化引号转义回归测试
