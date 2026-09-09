@@ -611,9 +611,29 @@ func cmdExport(args []string) error {
 	if err := os.WriteFile(*out, data, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", *out, err)
 	}
-	fmt.Fprintf(os.Stderr, "exported %s suppliers (%s, %d bytes) → %s\n",
-		countExported(fmtType, data), fmtType, len(data), *out)
+	if fmtType == "json" {
+		fmt.Fprintf(os.Stderr, "exported %s suppliers (json, %d bytes) → %s\n",
+			jsonCount(data), len(data), *out)
+	} else {
+		// Row count is not cheaply available without an xlsx parser in the
+		// CLI; report the artifact and size rather than an unhelpful "?".
+		fmt.Fprintf(os.Stderr, "exported suppliers workbook (xlsx, %d bytes) → %s\n",
+			len(data), *out)
+	}
 	return nil
+}
+
+// jsonCount extracts the document count from a full-fidelity JSON export
+// bundle for the success message; "?" only if the body is unexpectedly not
+// the bundle shape.
+func jsonCount(data []byte) string {
+	var b struct {
+		Count int `json:"count"`
+	}
+	if json.Unmarshal(data, &b) == nil {
+		return fmt.Sprintf("%d", b.Count)
+	}
+	return "?"
 }
 
 // cmdBackup downloads a full library backup (数据备份: consistent DB
@@ -722,22 +742,6 @@ func cmdRestoreCancel(_ []string) error {
 	}
 	fmt.Println("已取消暂存的恢复包。")
 	return nil
-}
-
-// countExported extracts the document count for the human-facing success
-// line without parsing xlsx (JSON bundle carries an explicit count; an
-// xlsx count is left as "?").
-func countExported(format string, data []byte) string {
-	if format != "json" {
-		return "?"
-	}
-	var b struct {
-		Count int `json:"count"`
-	}
-	if json.Unmarshal(data, &b) == nil {
-		return fmt.Sprintf("%d", b.Count)
-	}
-	return "?"
 }
 
 // reorderFlags moves flag arguments before positional ones. The stdlib

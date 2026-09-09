@@ -41,3 +41,15 @@ func TestRejectBlankIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestJSONCount(t *testing.T) {
+	if got := jsonCount([]byte(`{"format":"supplider-export","count":42,"suppliers":[]}`)); got != "42" {
+		t.Errorf("valid bundle count = %q, want 42", got)
+	}
+	if got := jsonCount([]byte(`not json`)); got != "?" {
+		t.Errorf("invalid body count = %q, want ?", got)
+	}
+	if got := jsonCount(nil); got != "?" {
+		t.Errorf("nil body count = %q, want ?", got)
+	}
+}
