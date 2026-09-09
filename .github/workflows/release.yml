@@ -103,7 +103,7 @@ jobs:
           # No @tauri-apps/cli dependency is checked into the repo (the Tauri
           # shell lives in src-tauri/), so invoke the CLI through npx. The
           # CLI auto-discovers ./src-tauri/tauri.conf.json from the repo root.
-          tauriScript: npx --yes @tauri-apps/cli@^2 build
+          tauriScript: npx --yes @tauri-apps/cli@^2
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
   binaries:
