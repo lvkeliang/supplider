@@ -44,7 +44,9 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 **发布就绪验证（本机，CI 的可验证部分全部通过）**：`go test ./...` 与 `-tags personal` 全绿（13 包）；三 tier（personal/small_business/enterprise）编译+vet 干净；发布五目标交叉编译成功
 linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M / darwin-arm64 23M；前端 vitest 7/7、tsc 干净、vite build 干净（测试代码不进 bundle）；嵌入包 webui/dist 被 gitignore 由 CI build-frontend.sh 重建。
 
-**唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。侧侧器 Rust 仅在 release tag 的 CI runner 编译（本机无 Rust 工具链，见记忆 sidecar-supervision-and-ci），改动后需专门一轮加 `cargo check` 到 CI。
+**CI 已补 Tauri shell 编译检查（2026-09-09）**：ci.yml 新增 `shell` job（push master + PR），装 webkit2gtk-4.1/GTK 系统依赖、setup-node 先 `npm run build`（generate_context! 编译期要嵌入 frontendDist）、dtolnay rust + Swatinem rust-cache，在 src-tauri 跑 `cargo check`。Rust 改动不再只等 release tag 暴露。注意：①未提交 Cargo.lock（本机无 Rust 工具链无法 `cargo generate-lockfile`），CI 每次在 runner 内生成并缓存；有工具链后应提交 lock 以固定依赖图、避免上游 yanked crate 卡住发布；②externalBin 的 sidecar 二进制是打包期（tauri build）才需要，cargo check 不需要。首次 CI 运行即为该 job 的验证；若 generate_context! 对 dist 有额外要求，按报错补构建步骤。
+
+**唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。
 
 ### 2026-09-09：sidecar HTTP 服务失败改为优雅退出，不再跳过 store.Close
 
