@@ -48,6 +48,27 @@ linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M 
 
 **唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。
 
+### 2026-09-09：资质到期写入校验，含数字但无法解析的日期不再静默漏提醒
+
+补齐此前两次后挂的写入反馈（见 2026-09-09 风险/到期两条）：`validateExpiryDates` 在 Create/Update 校验
+qualifications.expiry——空、四种布局可解析、**无任何数字**的自由文本（"长期有效/长期/永久"等永久资质）
+均放行；但**含数字**却四种布局都解析失败（如 2026/13/01、abc2026、10-2026）→ 明确报错，列出合法
+写法并提示空=无到期日/可用无数字备注。规则兼顾两点：永久资质是合法值（不能一刀切拒绝任意非空），
+而含数字即"意图写日期"，笔误必须当场纠正，不能像旧逻辑那样被扫描静默跳过、永远没有 90/30/7 提醒。
+扫描端对历史脏数据仍宽容跳过（不批量失败）。前端 type=date 只发 ISO/空，不受影响；importer 不映射
+到期列（importer.go 构造 Qualification 只带 Type/Level，空 Expiry 首轮 continue 即过）。补
+Create/Update 拒绝+接受各 2 例。验证中发现本机 1000 行导入性能测试在 ~3.0s 临界
+（历史 CI 2.2–2.5s），A/B（stash 前后 3.01 vs 3.02）证明本改动零影响，系当前机器持续构建负载；
+非性能回归，干净 CI runner 应正常。Go 双 tag（除该时序阈值外）全绿、三 tier 编译、vet/fmt 净。
+
+**2026-09-10 收口（上轮超时遗留）**：上轮只在 service 层验证，本轮走查 HTTP 边界发现错误文案
+"has unparseable expiry"不含 `required`/`must be`，会被 `writeServiceError` 的子串兜底归入
+**500**（用户笔误显示成服务器错误，正是本仓反复抓的那类哨兵错分类）。改文案为 "expiry … must be
+a valid date …"（与 visibility/performance 校验同一约定，自动落 400），并补 httpapi 两例
+（POST 笔误 400 / 长期有效+ISO 201；PATCH 笔误 400 / 中文年月日 200）钉死边界。MCP/CLI 透传
+service 文案不受影响；restore/merge 走 store.Put 不经该校验。再跑 A/B：stash 掉校验后 1000 行
+导入仍 3.17s 超线，坐实超时纯系机器负载。三 tier 编译、default+personal 全量（除 perf 时序）绿。
+
 ### 2026-09-09：srm-mcp 默认数据目录解析加测试，锁死"与桌面 App 同库"
 
 SETUP.md 承诺独立运行的 srm-mcp 缺省读写桌面 App 的同一个 per-user 库。核查 cmd/srm-mcp 的

@@ -9,11 +9,14 @@ package supplier
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/supplider/supplider/backend/internal/datamodel"
+	"github.com/supplider/supplider/backend/internal/domain"
 )
 
 // Reminder windows per PRD: 资质到期提醒（提前 90/30/7 天）.
@@ -150,6 +153,42 @@ var expiryDateLayouts = []string{
 	"2006/1/2",
 	"2006.1.2",
 	"2006年1月2日",
+}
+
+// validateExpiryDates guards the write path against date typos that would
+// otherwise make a qualification silently ineligible for renewal reminders
+// (the scan skips anything it cannot parse). An expiry is accepted when it
+// is empty (no date), parses via an accepted layout, or carries NO digit at
+// all — the latter covers legitimate permanent / free-text values such as
+// "长期有效". A value containing digits that parses as none of the layouts
+// (e.g. "2026.10.1", "2026/13/01") is rejected loudly so the caller fixes
+// the format instead of missing every reminder.
+func validateExpiryDates(quals []domain.Qualification) error {
+	for _, q := range quals {
+		s := strings.TrimSpace(q.Expiry)
+		if s == "" || !containsDigit(s) {
+			continue
+		}
+		if _, ok := parseExpiryDate(s); ok {
+			continue
+		}
+		// "must be" keeps this a client-fault 400 in the HTTP error mapper,
+		// matching every other supplier validation error (visibility,
+		// performance …); a date typo is not a server fault.
+		return fmt.Errorf(
+			"supplier: qualification %q expiry %q must be a valid date (YYYY-MM-DD / YYYY/MM/DD / YYYY.MM.DD / YYYY年M月D日), empty, or a digit-free note such as 长期有效",
+			strings.TrimSpace(q.Type), s)
+	}
+	return nil
+}
+
+func containsDigit(s string) bool {
+	for _, r := range s {
+		if unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseExpiryDate accepts the stored ISO date ("2026-10-01"), common

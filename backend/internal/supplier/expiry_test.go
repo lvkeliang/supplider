@@ -165,3 +165,47 @@ func TestExpiringQualificationsExcludesArchived(t *testing.T) {
 		t.Fatalf("archived supplier generated %d alerts, want 0: %+v", len(alerts), alerts)
 	}
 }
+
+// Write-path validation: a digit-containing expiry that parses as none of
+// the date layouts is a typo and must fail loudly (it would otherwise skip
+// every reminder silently); empty, digit-free free text (永久资质) and valid
+// dates are all accepted.
+func TestCreateRejectsUnparseableDateLikeExpiry(t *testing.T) {
+	ctx := context.Background()
+	svc := supplier.NewService(memory.New())
+	base := func(exp string) supplier.CreateInput {
+		in := cleanInput()
+		in.Qualifications = []domain.Qualification{{Type: "建筑工程施工总承包", Level: "一级", Expiry: exp}}
+		return in
+	}
+	for _, bad := range []string{"2026.13.01", "2026/13/01", "abc2026", "10-2026"} {
+		if _, err := svc.Create(ctx, base(bad)); err == nil {
+			t.Errorf("Create with expiry %q: expected error, got nil (reminder would be silently missed)", bad)
+		}
+	}
+	// Accepted: empty, digit-free permanent note, and each valid spelling.
+	for _, ok := range []string{"", "长期有效", "长期", "2027-06-30", "2027/6/30", "2027.6.30", "2027年6月30日"} {
+		if _, err := svc.Create(ctx, base(ok)); err != nil {
+			t.Errorf("Create with expiry %q: unexpected error: %v", ok, err)
+		}
+	}
+}
+
+func TestUpdateRejectsUnparseableDateLikeExpiry(t *testing.T) {
+	ctx := context.Background()
+	svc := supplier.NewService(memory.New())
+	doc, err := svc.Create(ctx, cleanInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(ctx, doc.ID, supplier.UpdateInput{
+		Qualifications: &[]domain.Qualification{{Type: "市政", Level: "二级", Expiry: "2026.13.01"}},
+	}); err == nil {
+		t.Error("Update with typo expiry: expected error, got nil")
+	}
+	if _, err := svc.Update(ctx, doc.ID, supplier.UpdateInput{
+		Qualifications: &[]domain.Qualification{{Type: "市政", Level: "二级", Expiry: "长期有效"}},
+	}); err != nil {
+		t.Errorf("Update with permanent note: unexpected error: %v", err)
+	}
+}

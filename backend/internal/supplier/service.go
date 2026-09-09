@@ -78,6 +78,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Supplier,
 	if err := validatePerformance(in.Performance); err != nil {
 		return nil, err
 	}
+	if err := validateExpiryDates(in.Qualifications); err != nil {
+		return nil, err
+	}
 
 	now := s.now()
 	doc := &domain.Supplier{
@@ -179,6 +182,9 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (*domai
 		doc.BasicInfo = *in.BasicInfo
 	}
 	if in.Qualifications != nil {
+		if err := validateExpiryDates(*in.Qualifications); err != nil {
+			return nil, err
+		}
 		addChange(diffField("qualifications", doc.Qualifications, *in.Qualifications, now, in.Source))
 		doc.Qualifications = *in.Qualifications
 	}
