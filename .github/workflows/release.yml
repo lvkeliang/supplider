@@ -100,7 +100,7 @@ jobs:
           releaseBody: 'See assets below for desktop installers and CLI/MCP tools.'
           releaseDraft: false
           prerelease: false
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          githubToken: ${{ secrets.ACCESS_TOKEN }}
           # No @tauri-apps/cli dependency is checked into the repo (the Tauri
           # shell lives in src-tauri/), so invoke the CLI through npx. The
           # CLI auto-discovers ./src-tauri/tauri.conf.json from the repo root.
@@ -134,5 +134,5 @@ jobs:
 
       - name: attach to GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         run: gh release upload "${GITHUB_REF_NAME}" dist/release/* --clobber
