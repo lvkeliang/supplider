@@ -34,6 +34,27 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：前端首次引入单测（vitest），锁定查询参数序列化契约
+
+前几轮把后端"输入无法识别不能静默退化"的错误在前端读了一遍：合并选择器对黑名单/归档候选正确
+禁用、所有筛选输入都是受控组件（资质等级固定下拉，发不出后端现在会 400 的值）、本地优先开关
+正确映射 prefer=0、QUAL_LEVELS 与后端七级完全一致——未发现前端 bug。但前端此前**零测试**，
+而 api.ts 内联构造每个列表/导出 URL（一处写错即静默让筛选失效）。本轮：
+
+- 离线（node_modules 已缓存，--prefer-offline）引入 vitest 2，加 `npm test`/`test:watch`，
+  新增 vitest.config.ts（node 环境，匹配 src/**/*.test.ts(x)）。
+- 把内联查询构造抽成两个**纯函数**并测：`filterQuery`（纯筛选，导出全量用，不带分页/排序/
+  prefer）与 `listQuery`（筛选+sort/order/limit/cursor+prefer）。统一 compact 规则：空串/
+  false/数值 0 视为"未设置"省略；`prefer=0` 仅在 localFirst===false 时发送；资质等级值逐字
+  透传。listSuppliers/exportUrl 改调它们（行为不变，去重两份内联映射）。
+- 测试 7 例：无筛选为空、筛选（含二级资质）逐字透传、空值省略、prefer 三态、布尔/数字转
+  字符串、export 去掉分页/prefer 但保留资质硬过滤。
+- CI frontend job 在 npm ci 后加 `npm test` 与 `npm run typecheck`；tsconfig 覆盖 src
+  （含测试），`tsc -b` 与 vite build 均通过，测试代码不进生产 bundle（grep describe=0），
+  嵌入包重建正常。vitest 仅在 devDependencies（不进运行时/嵌入包）。
+- 后挂：纯展示映射（severity/expiry tag 等）暂不补测（价值低）；交互组件测试需 jsdom，
+  后续按需引入。
+
 ### 2026-09-09：Excel 导出补齐网址/主营产品列，导出→重导不再静默丢字段
 
 审计导出/重导闭环（exporter 与 importer 同为仅有的两个 excelize 适配点；XLSX 表头刻意与

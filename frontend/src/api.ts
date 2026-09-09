@@ -133,6 +133,56 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T
 }
 
+/** Compact filter params, shared by the list and export endpoints. */
+function compact(
+  params: Record<string, string | number | boolean | undefined>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(params)) {
+    // Empty string, false and numeric 0 all mean "unset" on the backend
+    // (0 is the default/no-filter value for ratings and limit).
+    if (v === undefined || v === '' || v === false || v === 0) continue
+    out[k] = String(v)
+  }
+  return out
+}
+
+/** Filter-only query (export walks the whole library; no paging/prefer). */
+export function filterQuery(p: ListParams): Record<string, string> {
+  return compact({
+    q: p.q,
+    province: p.province,
+    city: p.city,
+    district: p.district,
+    category: p.category,
+    min_qual_level: p.min_qual_level,
+    min_rating: p.min_rating,
+    max_rating: p.max_rating,
+    owner: p.owner,
+    status: p.status,
+    include_archived: p.include_archived,
+    watched: p.watched,
+  })
+}
+
+/**
+ * Serializes list filters + paging into query parameters (pure; unit-tested).
+ * The backend strictly rejects unrecognized min_qual_level values, so the
+ * controlled value passes through verbatim.
+ */
+export function listQuery(p: ListParams): Record<string, string> {
+  return compact({
+    ...filterQuery(p),
+    sort: p.sort,
+    order: p.order,
+    limit: p.limit,
+    cursor: p.cursor,
+    // The list endpoint ranks home-region suppliers first by default via
+    // the saved preference; prefer=0 opts out for one request.
+    prefer: p.localFirst === false ? '0' : undefined,
+  })
+}
+
 function withQuery(path: string, params: Record<string, string | number | boolean | undefined>): string {
   const qs = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -172,29 +222,7 @@ export const api = {
     }),
 
   listSuppliers: (p: ListParams = {}) =>
-    request<Page<SupplierSummary>>(
-      'GET',
-      withQuery('/api/v1/suppliers', {
-        q: p.q,
-        province: p.province,
-        city: p.city,
-        district: p.district,
-        category: p.category,
-        min_qual_level: p.min_qual_level,
-        min_rating: p.min_rating,
-        max_rating: p.max_rating,
-        owner: p.owner,
-        status: p.status,
-        include_archived: p.include_archived,
-        watched: p.watched,
-        sort: p.sort,
-        order: p.order,
-        limit: p.limit,
-        cursor: p.cursor,
-        // withQuery skips booleans, so send the literal 0 when opting out.
-        prefer: p.localFirst === false ? '0' : undefined,
-      }),
-    ),
+    request<Page<SupplierSummary>>('GET', withQuery('/api/v1/suppliers', listQuery(p))),
 
   // Follow / unfollow a supplier (关注). Watching writes no change_log and
   // does not reorder lists; watched suppliers raise change notifications.
@@ -220,20 +248,7 @@ export const api = {
   // answers with Content-Disposition: attachment, so navigating to the URL
   // (or clicking a hidden anchor) starts a download without leaving the app.
   exportUrl: (p: ListParams, format: 'json' | 'xlsx') =>
-    withQuery('/api/v1/export', {
-      q: p.q,
-      province: p.province,
-      city: p.city,
-      district: p.district,
-      category: p.category,
-      min_qual_level: p.min_qual_level,
-      min_rating: p.min_rating,
-      max_rating: p.max_rating,
-      owner: p.owner,
-      status: p.status,
-      include_archived: p.include_archived,
-      format,
-    }),
+    withQuery('/api/v1/export', { ...filterQuery(p), format }),
 
   // Pre-entry duplicate check (录入去重): strong on credit code, probable on
   // normalized name; includes blacklisted/archived records. Non-blocking.
