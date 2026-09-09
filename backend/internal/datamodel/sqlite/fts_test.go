@@ -9,12 +9,15 @@ package sqlite_test
 import (
 	"context"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/datamodel/sqlite"
 	"github.com/supplider/supplider/backend/internal/domain"
+	"github.com/supplider/supplider/backend/internal/search"
 )
 
 func ftsStore(t *testing.T) datamodel.SupplierStore {
@@ -198,6 +201,207 @@ func TestFTSKeywordCombinedWithFilter(t *testing.T) {
 	if len(page.Items) != 0 {
 		t.Errorf("short keyword + city filter = %d rows, want 0", len(page.Items))
 	}
+}
+
+// TestFTSConcatCJKAcrossFields covers space-free Chinese queries whose
+// concepts live in DIFFERENT document fields (region columns vs category
+// /product text), e.g. the real-world "杭州混凝土". The trigram phrase
+// cannot be contiguous; bigram coordination must find it.
+func TestFTSConcatCJKAcrossFields(t *testing.T) {
+	st := ftsStore(t)
+	// Company name omits the city; 杭州 exists only in the region fields.
+	putSupplier(t, st, "sup_cc_1", "顺通商品混凝土有限公司",
+		func(d *domain.Supplier) {
+			d.Categories = []string{"建材"}
+			d.ProductsServices = []domain.ProductService{{Name: "混凝土c30配送"}}
+		})
+	putSupplier(t, st, "sup_cc_2", "海达商砼站",
+		func(d *domain.Supplier) {
+			d.Categories = []string{"建材"}
+			d.BasicInfo.Region = domain.Region{Province: "浙江", City: "宁波", District: "鄞州区"}
+		})
+
+	if ids := searchIDs(t, st, "杭州混凝土"); len(ids) != 1 || ids[0] != "sup_cc_1" {
+		t.Errorf(`"杭州混凝土" = %v, want [sup_cc_1] (place+product in different fields)`, ids)
+	}
+	if ids := searchIDs(t, st, "杭州商砼"); len(ids) != 1 || ids[0] != "sup_cc_1" {
+		t.Errorf(`"杭州商砼" = %v, want [sup_cc_1] (synonym expansion + place)`, ids)
+	}
+	if ids := searchIDs(t, st, "宁波混凝土"); len(ids) != 1 || ids[0] != "sup_cc_2" {
+		t.Errorf(`"宁波混凝土" = %v, want [sup_cc_2]`, ids)
+	}
+	// Generic product alone must not drag in the other city's supplier.
+	if ids := searchIDs(t, st, "杭州建材"); !sameIDs(ids, "sup_cc_1") {
+		t.Errorf(`"杭州建材" = %v, want only [sup_cc_1]`, ids)
+	}
+}
+
+// TestFTSConcatCJKASCIIIdentifier pins the precision fix: a Han company-name
+// prefix shared by every document must NOT make an ASCII sequence-number
+// suffix go fuzzy. "…供应商001" may match only rows containing "001"
+// contiguously (001 and its 001x variants) — never 010/101/201.
+func TestFTSConcatCJKASCIIIdentifier(t *testing.T) {
+	st := ftsStore(t)
+	for _, n := range []string{"000", "001", "0010", "0011", "010", "101", "201"} {
+		putSupplier(t, st, "sup_seq_"+n, "测试导出供应商"+n)
+	}
+	ids := searchIDs(t, st, "测试导出供应商001")
+	for _, bad := range []string{"sup_seq_000", "sup_seq_010", "sup_seq_101", "sup_seq_201"} {
+		if contains(ids, bad) {
+			t.Errorf(`"…供应商001" = %v, must not include %s (ASCII suffix went fuzzy)`, ids, bad)
+		}
+	}
+	for _, good := range []string{"sup_seq_001", "sup_seq_0010", "sup_seq_0011"} {
+		if !contains(ids, good) {
+			t.Errorf(`"…供应商001" = %v, must include %s (contiguous 001)`, ids, good)
+		}
+	}
+}
+
+// TestFTSCoordinationParityWithReferenceMatcher is the anti-divergence
+// guarantee: for every coordination-eligible term the SQL predicate built
+// by keywordPredicates must return EXACTLY the documents for which the
+// engine-agnostic matcher search.AllTermsMatch(search.DocumentText(doc))
+// returns true. The future Meilisearch adapter inherits the same reference.
+func TestFTSCoordinationParityWithReferenceMatcher(t *testing.T) {
+	st := ftsStore(t)
+	docs := []*domain.Supplier{
+		// name without place + region fields + product in a separate field
+		{
+			ID: "p_1", Owner: "u", Status: domain.StatusActive, Visibility: domain.VisSelf,
+			BasicInfo: domain.BasicInfo{
+				CompanyName: "顺通商品混凝土有限公司",
+				Region:      domain.Region{Province: "浙江", City: "杭州", District: "西湖区"},
+			},
+			Categories:       []string{"建材"},
+			ProductsServices: []domain.ProductService{{Name: "混凝土c30配送"}},
+		},
+		{
+			ID: "p_2", Owner: "u", Status: domain.StatusActive, Visibility: domain.VisSelf,
+			BasicInfo: domain.BasicInfo{
+				CompanyName: "海达商砼站",
+				Region:      domain.Region{Province: "浙江", City: "宁波", District: "鄞州区"},
+			},
+			Categories: []string{"建材"},
+		},
+		{
+			ID: "p_3", Owner: "u", Status: domain.StatusActive, Visibility: domain.VisSelf,
+			BasicInfo: domain.BasicInfo{
+				CompanyName: "杭州一建集团有限公司",
+				Region:      domain.Region{Province: "浙江", City: "杭州", District: "余杭区"},
+			},
+			Categories: []string{"施工服务"},
+			CustomFields: map[string]any{
+				"资质等级": "施工总承包一级",
+			},
+		},
+		{
+			ID: "p_4", Owner: "u", Status: domain.StatusActive, Visibility: domain.VisSelf,
+			BasicInfo: domain.BasicInfo{
+				CompanyName: "测试导出供应商010",
+				Region:      domain.Region{Province: "浙江", City: "杭州", District: "西湖区"},
+			},
+		},
+	}
+	now := time.Now().UTC()
+	ctx := context.Background()
+	for _, d := range docs {
+		d.CreatedAt, d.UpdatedAt = now, now
+		if err := st.Put(ctx, d); err != nil {
+			t.Fatalf("Put %s: %v", d.ID, err)
+		}
+	}
+
+	queries := []string{
+		"杭州混凝土",      // cross-field place+product
+		"杭州商砼",       // cross-field via synonym expansion
+		"杭州建材",       // place+category
+		"宁波混凝土",      // product present, wrong place
+		"杭州有限公司",     // leading place + generic suffix
+		"北京有限公司",     // generic suffix without the place
+		"杭州一建",       // contiguous in name (exact path)
+		"杭州施工总承包",    // name place + custom-field concept
+		"杭州混凝土c30",   // with literal ASCII fragment present
+		"杭州混凝土c40",   // …fragment absent
+		"测试导出供应商001", // shared Han prefix, digit tail mismatch
+		"杭州 混凝土",     // two spaced terms (AND)
+		"杭州 宁波",      // contradictory spaced terms
+	}
+	for _, kw := range queries {
+		// Parity holds as long as no term can be answered ONLY via the pinyin
+		// column (the Go reference matcher models DocumentText, not py):
+		// coordination-eligible terms are Han-majority (their exact MATCH
+		// cannot hit ASCII pinyin tokens), pure-Han terms cannot either, and
+		// sub-3-rune terms use LIKE on search_text directly.
+		for _, term := range search.SplitTerms(kw) {
+			if _, eligible := search.CJKCoordination(term); eligible {
+				continue
+			}
+			allHan := true
+			for _, r := range term {
+				if !(r >= 0x4E00 && r <= 0x9FFF) {
+					allHan = false
+				}
+			}
+			// ≥3-rune non-Han terms (pinyin/credit codes) may match via the
+			// py column only; the Go reference does not model py, so such
+			// terms belong in TestFTSPinyin, not this parity matrix.
+			if utf8.RuneCountInString(term) >= 3 && !allHan {
+				t.Fatalf("test matrix drift: %q contains ASCII term %q that may match via py only", kw, term)
+			}
+		}
+
+		page, err := st.List(ctx, datamodel.Query{Filter: datamodel.SupplierFilter{Keyword: kw}})
+		if err != nil {
+			t.Fatalf("List %q: %v", kw, err)
+		}
+		got := map[string]bool{}
+		for _, d := range page.Items {
+			got[d.ID] = true
+		}
+		want := map[string]bool{}
+		for _, d := range docs {
+			if search.AllTermsMatch(search.DocumentText(d), kw) {
+				want[d.ID] = true
+			}
+		}
+		if !sameSet(got, want) {
+			t.Errorf("keyword %q: SQL hits %s, reference matcher %s", kw, keys(got), keys(want))
+		}
+	}
+}
+
+func sameIDs(ids []string, want ...string) bool {
+	if len(ids) != len(want) {
+		return false
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameSet(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func TestFTSIndexSyncsOnUpdate(t *testing.T) {

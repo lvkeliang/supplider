@@ -17,12 +17,12 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
+	"github.com/supplider/supplider/backend/internal/search"
 )
 
 // Store is a goroutine-safe in-memory SupplierStore.
@@ -202,38 +202,13 @@ func containsAny(haystack, needles []string) bool {
 	return false
 }
 
-// matchesKeyword does naive substring matching over the searchable text
-// blob. The real full-text port (search.Index) owns tokenization, pinyin
-// and fuzzy matching; this only keeps CLI/embedded flows functional
-// without a search engine.
+// matchesKeyword applies the engine-agnostic matcher to the same searchable
+// blob the SQLite FTS adapter indexes (search.DocumentText): whitespace terms
+// combine with AND, long space-free CJK runs additionally match via bigram
+// coordination, and region/synonyms are included. This keeps the in-memory
+// reference adapter and the shipped SQLite adapter behaviorally identical.
 func matchesKeyword(d *domain.Supplier, kw string) bool {
-	kw = strings.ToLower(strings.TrimSpace(kw))
-	if kw == "" {
-		return true
-	}
-	var b strings.Builder
-	b.WriteString(d.BasicInfo.CompanyName)
-	b.WriteString(" ")
-	b.WriteString(d.BasicInfo.CreditCode)
-	b.WriteString(" ")
-	b.WriteString(d.BasicInfo.LegalPerson)
-	b.WriteString(" ")
-	b.WriteString(d.BasicInfo.BusinessScope)
-	for _, c := range d.Categories {
-		b.WriteString(" ")
-		b.WriteString(c)
-	}
-	for _, p := range d.ProductsServices {
-		b.WriteString(" ")
-		b.WriteString(p.Name)
-	}
-	for k, v := range d.CustomFields {
-		b.WriteString(" ")
-		b.WriteString(k)
-		b.WriteString(" ")
-		fmt.Fprintf(&b, "%v", v)
-	}
-	return strings.Contains(strings.ToLower(b.String()), kw)
+	return search.AllTermsMatch(search.DocumentText(d), kw)
 }
 
 // ---------- sorting / keyset ----------

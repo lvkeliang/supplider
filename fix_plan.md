@@ -34,6 +34,47 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 已完成
 
+### 2026-09-09：无空格中文拼接检索——"杭州混凝土"跨字段命中（bigram 协调），SQLite 与内存适配器共用同一参考匹配器
+
+中文用户检索天然不带空格：地域+品类"杭州混凝土"是一个连续 run，但文档里
+"杭州"在地域字段、"混凝土"在品类/产品字段，FTS5 trigram 短语要求整串连续，
+于是**零命中**。个人版零依赖硬约束不允许引入分词词典，本轮落地词典无关的
+bigram 协调启发式，并把它放进引擎无关的 `internal/search` 包，供 FTS5（今天）
+与 Meilisearch/ES（以后）共用同一行为。上一轮循环在该特性上超时留下未提交
+半成品；本轮完成它、修掉一个精度回归并钉死 SQL↔Go 行为对等。
+
+- **统一可检索文本 `search.DocumentText`**（新 `search/document.go`）：公司名、
+  **省/市/区**（旧 blob 不含地域，跨字段查询的根源）、信用代码、法人、经营范围、
+  品类、产品名、自定义字段键值 + 索引期同义词扩展。SQLite 的 FTS content 列与
+  `search_text` 列、内存适配器的匹配文本全部由它生成（`buildSearchText` 变为
+  薄别名），三处分叉的 blob 拼接收敛为一处。
+- **协调计划 `search.CJKCoordination` → `CJKPlan`**（`search/cjk.go`）：对
+  ≥4 rune、汉字严格占多数的连续 term 切重叠 bigram 去重，命中文本中
+  `ceil(半数)` 个 bigram 即覆盖达标；另需 **front 锚点**（前两个 bigram 至少
+  出现一个——挡住"有限公司"类泛后缀单独命中）与 **back 锚点**（末 bigram 必须
+  出现——挡住"同行业长前缀、尾部概念不同"的误配）；term 内每个 ≥2 字符的
+  ASCII 字母数字 run（`001`、`c30` 等编号/型号）必须**连续出现**，编号永不被
+  bigram 打散。短词/拼音/非汉字主导 run 仍走原来的连续子串路径。
+- **精度回归（本轮修复）**：上一轮半成品只有 front 锚点，`TestExportWalksAllPages`
+  暴露：205 家"测试导出供应商NNN"被"…供应商001"**全部命中**——6 个共同前缀
+  bigram 已达半数阈值。back 锚点挡住纯汉字版本；ASCII 片段定长要求让
+  `010/101/201` 不再混入，只有真正含连续"001"的 001、001x 命中（与原子串语义
+  一致，11 条）。
+- **两个适配器镜像同一逻辑**：内存适配器 `matchesKeyword` 删除私有 naive
+  子串实现，直接调 `search.AllTermsMatch(DocumentText(d), kw)`；SQLite
+  `keywordPredicates` 保持无协调词时的原 SQL 形状（合并 MATCH + 短词 LIKE，
+  普通查询零变化），仅当存在可协调 term 时走逐 term 分支：`exact（trigram
+  MATCH / LIKE）OR（bigram CASE 计数覆盖 AND front OR AND back AND 各 ASCII
+  片段 LIKE）`，各 term 之间仍 AND。
+- 测试：`search/cjk_test.go`（跨字段、锚点形状、不合格 term、ASCII 片段、
+  纯汉字共享前缀拒绝、AND 多 term）；sqlite 包新增跨字段端到端、编号不扩散、
+  以及 **`TestFTSCoordinationParityWithReferenceMatcher`**——13 个查询矩阵上
+  SQL 命中 ID 集合必须与 `AllTermsMatch(DocumentText(doc))` **逐集合相等**
+  （矩阵守卫：含可能只走 py 拼音列的 ASCII 词会直接 fail，防测试静默漂移）。
+- 验证：default + `personal` 全量测试绿；`personal/small-business/enterprise`
+  三 tag 编译通过（加上无 tag 即四配置）；gofmt/vet 净。后挂：前端搜索框可加
+  一行"空格分词、拼音缩写也可"的提示；Meilisearch 适配器落地时照对等矩阵复用。
+
 ### 2026-09-09：前端启动连接闸门——sidecar 冷启动未就绪时自动重试，不再首屏永久"后端未连接"
 
 Tauri 外壳注释一直声称"窗口立即打开、**前端轮询直到 API 就绪**"，但前端实际只在

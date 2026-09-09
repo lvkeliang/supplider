@@ -626,34 +626,11 @@ func decode(docText, id string) (*domain.Supplier, error) {
 // cannot index) and the FTS5 content column, so synonym lookups work on
 // either path — searching "商砼" finds a document that only says
 // "混凝土" and vice-versa.
+// buildSearchText is the adapter-local alias for the engine-agnostic blob
+// builder; FTS content and the search_text column both derive from it, and
+// the memory adapter indexes the same text via search.DocumentText.
 func buildSearchText(d *domain.Supplier) string {
-	var b strings.Builder
-	b.WriteString(d.BasicInfo.CompanyName)
-	b.WriteString(" ")
-	b.WriteString(d.BasicInfo.CreditCode)
-	b.WriteString(" ")
-	b.WriteString(d.BasicInfo.LegalPerson)
-	b.WriteString(" ")
-	b.WriteString(d.BasicInfo.BusinessScope)
-	for _, c := range d.Categories {
-		b.WriteString(" ")
-		b.WriteString(c)
-	}
-	for _, p := range d.ProductsServices {
-		b.WriteString(" ")
-		b.WriteString(p.Name)
-	}
-	for k, v := range d.CustomFields {
-		b.WriteString(" ")
-		b.WriteString(k)
-		b.WriteString(" ")
-		fmt.Fprintf(&b, "%v", v)
-	}
-	text := b.String()
-	if extras := search.SynonymExpansions(text); len(extras) > 0 {
-		text += " " + strings.Join(extras, " ")
-	}
-	return text
+	return search.DocumentText(d)
 }
 
 // escapeLike escapes LIKE metacharacters so keyword input is literal text

@@ -177,21 +177,82 @@ func ftsVectors(d *domain.Supplier) (content, py string) {
 // memory adapter's all-terms-must-match semantics.
 func keywordPredicates(where []string, args []any, keyword string) ([]string, []any) {
 	terms := search.SplitTerms(keyword)
-	var longPhrases []string
+
+	// likeOnSearchText emits a case-insensitive substring predicate against
+	// s.search_text and binds the escaped literal. The coordination branch
+	// needs several of these; the ordinary paths use it for short terms.
+	likeOnSearchText := func(lit string) string {
+		args = append(args, "%"+escapeLike(lit)+"%")
+		return "LOWER(s.search_text) LIKE LOWER(?) ESCAPE '\\'"
+	}
+
+	// Fast path: when no term needs concatenated-CJK coordination, keep the
+	// original shape — one combined MATCH (implicit AND over all long
+	// phrases) plus LIKE for short terms — so ordinary queries are unchanged.
+	needCoord := false
 	for _, t := range terms {
-		if utf8.RuneCountInString(t) >= minTrigramRunes {
-			longPhrases = append(longPhrases, ftsQuote(t))
-		} else {
-			where = append(where, "LOWER(s.search_text) LIKE LOWER(?) ESCAPE '\\'")
-			args = append(args, "%"+escapeLike(t)+"%")
+		if _, ok := search.CJKCoordination(t); ok {
+			needCoord = true
+			break
 		}
 	}
-	if len(longPhrases) > 0 {
-		// Space-separated phrases are implicit AND; the single MATCH
-		// expression covers every long term in one index lookup.
-		where = append(where,
-			"s.id IN (SELECT doc_id FROM suppliers_fts WHERE suppliers_fts MATCH ?)")
-		args = append(args, strings.Join(longPhrases, " "))
+	if !needCoord {
+		var longPhrases []string
+		for _, t := range terms {
+			if utf8.RuneCountInString(t) >= minTrigramRunes {
+				longPhrases = append(longPhrases, ftsQuote(t))
+			} else {
+				where = append(where, likeOnSearchText(t))
+			}
+		}
+		if len(longPhrases) > 0 {
+			where = append(where,
+				"s.id IN (SELECT doc_id FROM suppliers_fts WHERE suppliers_fts MATCH ?)")
+			args = append(args, strings.Join(longPhrases, " "))
+		}
+		return where, args
+	}
+
+	// Per-term path: each term is (exact match OR bigram-coordination), and
+	// all terms AND together. Exact uses the FTS trigram index for long
+	// terms and LIKE for short ones; the coordination fallback finds a
+	// space-free CJK run (e.g. 杭州混凝土) whose concepts live in different
+	// fields, mirroring search.TermMatchesText: bigram coverage, a front
+	// anchor (one of the leading bigrams), the trailing bigram, and every
+	// ASCII identifier fragment contiguously.
+	for _, t := range terms {
+		var exact string
+		if utf8.RuneCountInString(t) >= minTrigramRunes {
+			exact = "s.id IN (SELECT doc_id FROM suppliers_fts WHERE suppliers_fts MATCH ?)"
+			args = append(args, ftsQuote(t))
+		} else {
+			exact = likeOnSearchText(t)
+		}
+		termParts := []string{exact}
+
+		if plan, ok := search.CJKCoordination(t); ok {
+			var cases []string
+			for _, bg := range plan.Bigrams {
+				cases = append(cases,
+					"(CASE WHEN "+likeOnSearchText(bg)+" THEN 1 ELSE 0 END)")
+			}
+			coverage := "(" + strings.Join(cases, " + ") + " >= ?)"
+			args = append(args, plan.MinHits)
+
+			var fronts []string
+			for _, bg := range plan.Front {
+				fronts = append(fronts, likeOnSearchText(bg))
+			}
+			coordAnds := []string{coverage, "(" + strings.Join(fronts, " OR ") + ")"}
+			if plan.Back != "" {
+				coordAnds = append(coordAnds, likeOnSearchText(plan.Back))
+			}
+			for _, frag := range plan.ExactFrags {
+				coordAnds = append(coordAnds, likeOnSearchText(frag))
+			}
+			termParts = append(termParts, strings.Join(coordAnds, " AND "))
+		}
+		where = append(where, "("+strings.Join(termParts, " OR ")+")")
 	}
 	return where, args
 }
