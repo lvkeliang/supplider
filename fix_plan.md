@@ -5,34 +5,46 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 
 ## 下一步优先级（个人版 MVP）
 
-1. **Tauri 安装包真机验证**：shell 代码与 sidecar 已完成并通过 HTTP 层 E2E（见下），
-   本机无 Rust 工具链未跑过 `tauri build`；**现已由 release.yml 在 GitHub runner
-   （含 Rust）上构建**——打 `v*` tag 即产出四平台安装包。剩余验证只需：tag 后下载
-   Release 里的安装包，确认体积（目标 ~15MB 安装器；实测 stripped sidecar ~16MB，
-   嵌入后安装器预计 20-25MB 量级）与双击拉起 sidecar；未签名，macOS 需解除隔离属性。
+1. ~~**【2026-09-10 已完成】本机 Rust 工具链已安装，跑通 cargo check + 提交 Cargo.lock + 纳入每轮验证**~~
+   **完成情况见"已完成"章节 2026-09-10 条目**：cargo check 首次本地运行即抓到 blocking_recv API
+   漂移编译错误（main.rs 从未在解析出的 tauri 2.11.5 / plugin-shell 2.3.6 上编译通过），已修复；
+   Cargo.lock（5002 行）已提交并从 .gitignore 移除；AGENT.md/PROMPT.md/审计节已更新；
+   旧"本机无 Rust 工具链"标记已更正。后续每轮验证清单第 4 项：src-tauri 有改动必须本机
+   `cargo check` 通过（前端 dist + sidecar 二进制需先就位）。
+
+2. **Tauri 安装包真机验证**：shell 代码与 sidecar 已完成并通过 HTTP 层 E2E（见下）；
+   本机 Rust 工具链已装，可跑 `cargo tauri build` 打 Linux 安装包做本地完整链路验证。
+   打 `v*` tag 触发 GitHub Release 产出四平台安装包。剩余验证：tag 后下载 Release
+   里的安装包，确认体积（目标 ~15MB 安装器；实测 stripped sidecar ~16MB，嵌入后安装器
+   预计 20-25MB 量级）与双击拉起 sidecar；未签名，macOS 需解除隔离属性。
    图标已由 `backend/cmd/genicons` 离线生成（PNG/ICO/ICNS）。后挂：代码签名/公证
    （TAURI_SIGNING_PRIVATE_KEY secrets）以启用 Tauri 自动更新。
-2. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
+
+3. **Meilisearch 适配器（小企业版，非个人版）**：个人版**不做**内嵌 Meilisearch——
    Meilisearch 是 Rust 独立 server 二进制、无可内嵌 Go 库，塞进个人版会破坏"单二进制
    零外部依赖 / ~15MB"硬约束。个人版搜索继续用 SQLite FTS5（已在 `search.Index` 接口
    之后，行为被测试钉住）；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）
    实现同一接口，届时照 FTS5 测试对照即可。
-3. ~~**合并重复供应商（人工）**~~ 已落地（见下），前端重复档案选择器亦已落地（详情页
+
+4. ~~**合并重复供应商（人工）**~~ 已落地（见下），前端重复档案选择器亦已落地（详情页
    🔀 合并重复直接列出查重候选，黑名单/归档候选禁用并说明；手输 id 保留为兜底）。
    后挂可选项：MCP 暴露 merge 工具（当前刻意不暴露给 Agent——合并会归档数据，属于需
    用户明确指示的破坏性操作，与"Agent 不擅自拉黑/处置"同一边界）。
-4. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
+
+5. 空壳检测后续增强：外部工商/司法数据（被执行人/行政处罚）接入位已留（RiskFlags 字段
    保留不被引擎覆盖）。黑名单生命周期已落地（见下）；外部数据"被执行人→自动预警"可后挂。
-5. ~~**可见性策略配置 UI + 定时处置**~~ 已落地（见下：策略落库 GET/PUT /api/v1/visibility/policy、
+
+6. ~~**可见性策略配置 UI + 定时处置**~~ 已落地（见下：策略落库 GET/PUT /api/v1/visibility/policy、
    设置页 SettingsView、sidecar 开机+每 24h 自动处置 ticker、MCP/CLI/HTTP 统一读持久化策略）。
    后挂：企业版通知服务把扫描报告推钉钉/企微的接口已用同一 `VisibilityViolation` 形状预留
    （小企业版/企业版接线即可）；策略变更审计可随操作审计日志（管理员平台）一并做。
-6. ~~srm-mcp 打包/分发~~ 已落地（见下：`scripts/build-tools.sh` 交叉编译 srm-mcp +
+
+7. ~~srm-mcp 打包/分发~~ 已落地（见下：`scripts/build-tools.sh` 交叉编译 srm-mcp +
    srm-cli 五平台产物到 dist/tools/ + sha256sums；`docs/mcp/SETUP.md` 安装配置指南）。
    ~~GitHub Releases 工作流~~ **已落地**（见下：ci.yml + release.yml；`v*` tag 自动
    产出四平台桌面安装包与五平台 CLI/MCP/daemon 二进制并附 SHA256SUMS）。
 
-## 审计覆盖现状（2026-09-09 收口）
+## 审计覆盖现状（2026-09-10 更新）
 
 连续对个人版全部核心面做了正确性/健壮性审计并修复，每处修复都带测试：
 - 外部输入面：HTTP 错误分类（坏游标/控制字符 key/畸形策略体）、MCP panic 隔离+超长行、CLI 空白 id
@@ -40,17 +52,71 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 - 数据保全：合并（仅评分绩效折叠/证书号补空）、Excel 导入（列序确定性/未知键）、备份恢复（布局类型冲突/真实链路）、附件引用计数、Excel 导出补网址/产品列
 - 决策引擎：空壳检测（15 位旧注册号误报/资本千分位/成立日期）、去重引擎（探针确认无误）、资质等级硬过滤静默失效、列表 keyset+本地优先属性测试、FTS 病态关键词不报错、通知 dedup 两适配器一致
 - 前端：引入 vitest（查询序列化契约）、合并选择器/受控筛选读一遍无误
+- Rust/Tauri shell：**本机 Rust 工具链已装，cargo check 已纳入每轮验证（2026-09-10 首次本地 check 即抓到并修复 blocking_recv API 漂移，见下）；Cargo.lock 已提交钉版**
 
 **发布就绪验证（本机，CI 的可验证部分全部通过）**：`go test ./...` 与 `-tags personal` 全绿（13 包）；三 tier（personal/small_business/enterprise）编译+vet 干净；发布五目标交叉编译成功
 linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M / darwin-arm64 23M；前端 vitest 7/7、tsc 干净、vite build 干净（测试代码不进 bundle）；嵌入包 webui/dist 被 gitignore 由 CI build-frontend.sh 重建。
 
-**CI 已补 Tauri shell 编译检查（2026-09-09）**：ci.yml 新增 `shell` job（push master + PR），装 webkit2gtk-4.1/GTK 系统依赖、setup-node 先 `npm run build`（generate_context! 编译期要嵌入 frontendDist）、dtolnay rust + Swatinem rust-cache，在 src-tauri 跑 `cargo check`。Rust 改动不再只等 release tag 暴露。注意：①未提交 Cargo.lock（本机无 Rust 工具链无法 `cargo generate-lockfile`），CI 每次在 runner 内生成并缓存；有工具链后应提交 lock 以固定依赖图、避免上游 yanked crate 卡住发布；②externalBin 的 sidecar 二进制是打包期（tauri build）才需要，cargo check 不需要。首次 CI 运行即为该 job 的验证；若 generate_context! 对 dist 有额外要求，按报错补构建步骤。
-**【2026-09-10 更正】** 该节判断"externalBin 仅 tauri build 打包期需要、cargo check 不需要"
-**是错的**：tauri-build 2 的 build.rs 无条件按当前 target triple 拷贝 externalBin sidecar，
-缺失即 `exit(1)("<path> does not exist")`，cargo check 同样跑 build.rs。已修 ci.yml
-（见 2026-09-10 条目），下述结论作废。
+**CI 已补 Tauri shell 编译检查（2026-09-09 创建，2026-09-10 修复 sidecar 依赖）**：ci.yml 新增 `shell` job（push master + PR），装 webkit2gtk-4.1/GTK 系统依赖、setup-node 先 `npm run build`（generate_context! 编译期要嵌入 frontendDist）、**setup-go + build-sidecar.sh**（build.rs 的 externalBin 资源校验需要 sidecar 二进制，cargo check 同样跑 build.rs）、dtolnay rust + Swatinem rust-cache，在 src-tauri 跑 `cargo check`。Rust 改动不再只等 release tag 暴露。
+**【2026-09-10 更新】本机 Rust 工具链已安装**（rustup stable + Tauri Linux 系统依赖），
+`cargo check` 可在本地快速验证。`Cargo.lock` 本轮需提交以固定依赖图。
+之前"externalBin 仅 tauri build 打包期需要、cargo check 不需要"的判断是错的——
+tauri-build 2 的 build.rs 无条件按当前 target triple 拷贝 externalBin sidecar，
+缺失即 exit(1)，cargo check 同样跑 build.rs。已修 ci.yml（见 2026-09-10 条目）。
 
 **唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。
+
+## 已完成
+
+### 2026-09-10：本机 Rust 工具链首次验证——cargo check 抓到 blocking_recv API 漂移并修复，Cargo.lock 提交钉版
+
+开发机装好 rustup stable（rustc/cargo 1.98.1）+ webkit2gtk-4.1 系统依赖。按 fix_plan 本轮
+任务首次在本机跑 `cargo check`，**立刻暴露一个真实编译错误**——shell Rust 代码从未在解析出的
+依赖版本上编译通过（无 Cargo.lock + 本机一直无 Rust，CI shell job 即使补了 sidecar 也会红）：
+
+- **错误**：`main.rs:63` `while let Ok(Some(event)) = rx.blocking_recv()` 类型不匹配——
+  tauri **2.11.5** 的 `async_runtime::Receiver` 现重导出 `tokio::sync::mpsc::Receiver`，
+  `blocking_recv(&mut self) -> Option<T>`（None=发送端全关闭），不再是 crossbeam 时代的
+  `Result<Option<CommandEvent>>`。修复为 `while let Some(event) = rx.blocking_recv()`，
+  并注释 None 语义；`TerminatedPayload{code,signal}` 与其余 match 臂在 plugin-shell 2.3.6
+  上形状不变。注意 tokio mpsc 的 blocking_recv 不能在 async 上下文调，当前 std thread 正确。
+- **Cargo.lock 提交**：5002 行，钉死 tauri 2.11.5 / tauri-plugin-shell 2.3.6 / reqwest
+  0.12.28 等全图，避免上游 yanked/再漂移卡住发版；从 `src-tauri/.gitignore` 移除 Cargo.lock
+  （二进制应用 crate 本就应提交 lock）。`target/` 与 binaries/ 保持忽略。
+- **前置产物实证**：本机实测移走 `suppliderd-x86_64-unknown-linux-gnu` 后 cargo check 立即
+  在 build.rs 失败、放回即过——与上轮 tauri-build 源码结论互证：check 前必须先
+  build-frontend（generate_context 嵌入 dist）+ build-sidecar（externalBin 无条件拷贝）。
+- **文档同步**：AGENT.md Key Learnings 更正错误条目（原写"check 不需要 sidecar"）并记 API
+  漂移；本节审计行确认；全仓旧"本机无 Rust 工具链"现行性标记更正（历史日志条目加按语，
+  不删史实）。
+- 验证：`cargo check` 0 错误（增量 ~1s）、`cargo test` harness 编译并跑过（0 单测）；
+  Go 侧零改动，default+personal 全量与三 tag 编译按清单复验。
+- **仍后挂（现在本机可做了）**：① `cargo tauri build` 本机打 Linux 包做完整链路；②
+  sidecar 崩溃后 Rust 侧 respawn（`CommandEvent::Terminated`，旧后挂理由"本机无 Rust"已消失）；
+  ③ CI shell job 转绿的远端实证随下次 push。
+
+### 2026-09-10：修复 shell CI job——cargo check 同样要求 sidecar 二进制（此前判断错误，job 一直红）
+
+2026-09-09 加 shell job 时断言"externalBin 仅 `tauri build` 打包期需要，cargo check 不需要"，
+**未在 Rust 环境验证，且是错的**。核查 tauri-build 2 源码（crates/tauri-build/src/lib.rs）：
+`try_build` 对 `bundle.externalBin` **无条件**执行 `copy_binaries`，按当前 TARGET 拼
+`binaries/suppliderd-<triple>` 并 `copy_file`，文件不存在直接 `anyhow!("<path> does not exist")`
+→ build.rs `exit(1)`。而 `src-tauri/binaries/*` 被 gitignore，fresh runner 上目录为空——
+所以 shell job 在每次 push/PR 上必然在 cargo check 阶段失败，Rust 编译检查实际从未生效。
+工作区 ci.yml 的手工修补即对应修复（写本条时本机尚无 Rust 工具链，由源码核查 + 次日
+本机实测双重确认，见上条）。收口内容：
+
+- **ci.yml shell job**：runs-on 统一为 ubuntu-22.04（与 release desktop 一致）；npm 用
+  `--prefix frontend`；在 webkit 系统依赖与 cargo check 之前插入 setup-go 1.25 +
+  `bash scripts/build-sidecar.sh`（纯 Go modernc 五 triple 交叉编译，linux runner 即可，
+  check 实际只需当前 x86_64-linux 那一个，全量构建与 release 共用同一脚本、更简单）。
+- 更正 job 尾部自相矛盾的旧注释（原注释还写着 sidecar "not required"）。
+- 本机可验证部分：YAML 合法、五 triple sidecar 实跑全部产出（16–17M stripped）；
+  Go 侧零改动，default+personal 测试与三 tag 编译不受影响。
+- **待下一次 push 由 CI 实证** shell job 转绿；若仍红，下一轮按 GitHub Actions 日志继续修。
+- 【2026-09-10 更新】Cargo.lock 已由下条工作生成并提交，不再"继续后挂"；但注意当时 shell
+  代码在解析出的 tauri 2.11.5 上另有 blocking_recv 编译错误（见上条），与 sidecar 缺失是
+  两个独立问题，均已修复后该 job 才具备转绿条件。
 
 ### 2026-09-09：资质到期写入校验，含数字但无法解析的日期不再静默漏提醒
 
@@ -72,27 +138,6 @@ a valid date …"（与 visibility/performance 校验同一约定，自动落 40
 （POST 笔误 400 / 长期有效+ISO 201；PATCH 笔误 400 / 中文年月日 200）钉死边界。MCP/CLI 透传
 service 文案不受影响；restore/merge 走 store.Put 不经该校验。再跑 A/B：stash 掉校验后 1000 行
 导入仍 3.17s 超线，坐实超时纯系机器负载。三 tier 编译、default+personal 全量（除 perf 时序）绿。
-
-### 2026-09-10：修复 shell CI job——cargo check 同样要求 sidecar 二进制（此前判断错误，job 一直红）
-
-2026-09-09 加 shell job 时断言"externalBin 仅 `tauri build` 打包期需要，cargo check 不需要"，
-**未在 Rust 环境验证，且是错的**。核查 tauri-build 2 源码（crates/tauri-build/src/lib.rs）：
-`try_build` 对 `bundle.externalBin` **无条件**执行 `copy_binaries`，按当前 TARGET 拼
-`binaries/suppliderd-<triple>` 并 `copy_file`，文件不存在直接 `anyhow!("<path> does not exist")`
-→ build.rs `exit(1)`。而 `src-tauri/binaries/*` 被 gitignore，fresh runner 上目录为空——
-所以 shell job 在每次 push/PR 上必然在 cargo check 阶段失败，Rust 编译检查实际从未生效。
-本机无 Rust 工具链，该问题由 CI 实跑暴露（工作区 ci.yml 的手工修补即对应修复）。本轮核实
-后收口：
-
-- **ci.yml shell job**：runs-on 统一为 ubuntu-22.04（与 release desktop 一致）；npm 用
-  `--prefix frontend`；在 webkit 系统依赖与 cargo check 之前插入 setup-go 1.25 +
-  `bash scripts/build-sidecar.sh`（纯 Go modernc 五 triple 交叉编译，linux runner 即可，
-  check 实际只需当前 x86_64-linux 那一个，全量构建与 release 共用同一脚本、更简单）。
-- 更正 job 尾部自相矛盾的旧注释（原注释还写着 sidecar "not required"）。
-- 本机可验证部分：YAML 合法、五 triple sidecar 实跑全部产出（16–17M stripped）；
-  Go 侧零改动，default+personal 测试与三 tag 编译不受影响。
-- **待下一次 push 由 CI 实证** shell job 转绿；若仍红，下一轮按 GitHub Actions 日志继续修。
-- 未变：仍无 Cargo.lock（本机无 Rust 工具链无法生成），依赖图固定继续后挂。
 
 ### 2026-09-09：srm-mcp 默认数据目录解析加测试，锁死"与桌面 App 同库"
 
@@ -124,7 +169,6 @@ modernc 驱动也不需要）。Go 双 tag 全量绿、三 tier 编译、vet/fmt
 
 启动序列审计发现一个边缘退出缺陷：serve goroutine 里 `srv.Serve(ln)` 在监听器已接管后若返回错误（listener 运行期失效等），旧代码 `log.Fatalf` 直接 `os.Exit(1)`，**绕过所有 defer**——包括 `store.Close()`，SQLite WAL 可能未 checkpoint、优雅 Shutdown 也不执行。修复：改为缓冲 `serveErr chan error`（cap 1，goroutine 永不阻塞），主循环 `select { <-ctx.Done() / <-serveErr }` 后统一走 `srv.Shutdown`（Serve 已返回时为 no-op）与 `defer store.Close()`；仅记录日志、退出码仍为非零语义（进程结束），但资源清理完整。SIGTERM 真机验证：readyz 正常，收信号后打印 "suppliderd stopped"，数据目录只留 supplider.db（无 -wal/-shm），干净关闭。listen/open-store/open-objects 的启动前 Fatalf 保留（此时无资源需要回滚）。Go 双 tag 全量绿、三 tier 编译、gofmt/vet 净。
 
-## 已完成
 
 ### 2026-09-09：FTS5 关键词健壮性审计——病态输入不报错，固化引号转义回归测试
 
@@ -475,6 +519,8 @@ IF NOT EXISTS 增量迁移（降级打开未来版本不破坏数据，user_vers
 - 仍后挂（非本轮）：shell 侧 Rust 自动重启 sidecar（`CommandEvent::Terminated`
   时 respawn）可消除"必须再双击一次"，但本机无 Rust 工具链、CI 仅在 release
   tag 编译 Rust，改动需专门一轮连同 ci.yml 增加 `cargo check` 一起做。
+  【2026-09-10 按语】两个前提都已消失：本机 Rust 已装（cargo check 秒级），
+  ci.yml shell job 每 push 都跑。respawn 现已可本地验证后直接做，无环境阻碍。
 
 ### 2026-09-09：无空格中文拼接检索——"杭州混凝土"跨字段命中（bigram 协调），SQLite 与内存适配器共用同一参考匹配器
 
@@ -615,6 +661,7 @@ Go sidecar 完成启动前就会首绘（冷盘 / 杀软扫描未签名 exe 可�
   会残留一个孤儿进程，但**应用每次都能正常打开**（连接到存活实例），远优于永久断连。Tauri
   侧可后挂 `tauri-plugin-single-instance`（Rust，需 CI 编译验证）在窗口层直接复用既有实例，
   与本兜底互补；本轮不动 Rust（本机无 Rust 工具链，无法提交"已验证"的改动）。
+  【2026-09-10 按语】"需 CI 编译验证"不再成立——本机已能 cargo check，该插件接入可本地验证。
 
 ### 2026-09-09：关注供应商 + 应用内变更通知铃铛（PRD 维护：变更推送通知关注者 + 资质到期提醒）
 

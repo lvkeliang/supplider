@@ -2,48 +2,111 @@
 
 ## Project Setup
 ```bash
-# Install dependencies (example for Node.js project)
+# Backend (Go)
+cd backend
+go mod download
+
+# Frontend
+cd frontend
 npm install
 
-# Or for Python project
-pip install -r requirements.txt
+# Desktop Shell (Rust / Tauri)
+# Rust 工具链已预装（rustup + stable），首次运行生成 Cargo.lock 并验证：
+cd src-tauri
+cargo check
 
-# Or for Rust project  
-cargo build
+# 完整桌面构建（需先构建前端 + sidecar 二进制）
+cd ..
+bash scripts/build-frontend.sh
+bash scripts/build-sidecar.sh
+cd src-tauri
+cargo tauri build
 ```
 
 ## Running Tests
 ```bash
-# Node.js
+# Go backend (default tag — memory sandbox)
+cd backend
+go test ./...
+
+# Go backend (personal tag — SQLite, the shipping config)
+go test -tags personal ./...
+
+# Frontend
+cd frontend
 npm test
 
-# Python
-pytest
-
-# Rust
-cargo test
+# Rust / Tauri shell
+cd src-tauri
+cargo test          # 运行 Rust 单元测试
+cargo check         # 快速编译检查（最快，推荐每轮验证用）
+cargo clippy        # 静态检查（可选，代码质量提升用）
 ```
 
 ## Build Commands
 ```bash
-# Production build
-npm run build
-# or
+# Go sidecar (all 5 triples, cross-compile)
+bash scripts/build-sidecar.sh
+
+# Frontend production build + embed into Go webui
+bash scripts/build-frontend.sh
+
+# Rust shell type check (fastest, recommended for per-loop verification)
+cd src-tauri
+cargo check
+
+# Rust shell release build
+cd src-tauri
 cargo build --release
+
+# Full Tauri desktop bundle (all platforms via CI)
+# 本机只打当前平台：
+cd src-tauri
+cargo tauri build
+
+# Full build pipeline (what CI runs)
+bash scripts/build-frontend.sh
+bash scripts/build-sidecar.sh
+cd src-tauri && cargo tauri build
 ```
 
 ## Development Server
 ```bash
-# Start development server
+# Go backend (personal mode, SQLite)
+cd backend
+go run -tags personal ./cmd/suppliderd --data-dir ./data --addr 127.0.0.1:7612
+
+# Frontend dev server (hot reload, proxies /api to sidecar)
+cd frontend
 npm run dev
-# or
-cargo run
+
+# Tauri dev mode (desktop app with hot-reload frontend)
+cd src-tauri
+cargo tauri dev
 ```
 
 ## Key Learnings
 - Update this section when you learn new build optimizations
 - Document any gotchas or special setup requirements
 - Keep track of the fastest test/build cycle
+
+### Rust / Tauri 相关要点
+- **`cargo check` 是最快的验证方式**：只做类型检查，不生成代码，比 `cargo build` 快 3-5 倍。每轮循环验证 Rust 代码改动优先用它
+- **`Cargo.lock` 必须提交**：固定依赖版本，避免上游 crate yanked 或版本漂移导致 CI 构建失败。`cargo check` 或 `cargo build` 后会自动生成/更新
+- **`cargo check` 同时需要前端产物和 sidecar 二进制（实测，勿再判断错）**：① `generate_context!` 编译期要嵌入 `frontend/dist`（先 `bash scripts/build-frontend.sh`）；② tauri-build 的 build.rs **无条件**按当前 target triple 拷贝 `bundle.externalBin` 指定的 sidecar，缺失即 `exit(1)("<path> does not exist")`，cargo check 同样触发。本机验证命令前必须先 `bash scripts/build-sidecar.sh`（本机 Linux check 实际只需 `suppliderd-x86_64-unknown-linux-gnu` 那一个，但全量脚本更省心）。2026-09-10 实测：移走 linux sidecar 后 cargo check 立即失败，放回即过
+- **sidecar 事件 API 漂移（2026-09-10 首次本地 cargo check 抓到）**：tauri 2.11.5 的 `async_runtime::Receiver` 是 `tokio::sync::mpsc::Receiver`，`rx.blocking_recv()` 返回 `Option<CommandEvent>`（None=发送端全部关闭），旧代码按 crossbeam 时代写法 `while let Ok(Some(event)) = ...` 类型不通过。正解 `while let Some(event) = rx.blocking_recv()`。另：`blocking_recv` 不能在 async 上下文调用，当前在 std thread 里用，正确。这正是无 Cargo.lock + 无本地 Rust 验证时 CI 每次解析到新版本就可能炸的实例——lock 已提交钉住 2.11.5/2.3.6
+- **系统依赖**：Linux 上 Tauri 需要 `libwebkit2gtk-4.1-dev` 等 GTK/WebKit 库。这些已在开发机上装好
+- **cross-compile Rust 到 Windows/macOS**：在 Linux 上交叉编译 Rust 到 Windows/macOS 目标比较麻烦（需要 MSVC/Apple SDK），所以桌面打包主要靠 GitHub Actions 的各平台 runner 来做。本机只验证 Linux 目标的编译正确性
+- **sidecar 二进制由 Go 交叉编译产出**：`scripts/build-sidecar.sh` 产出五平台的 Go 二进制，放到 `src-tauri/binaries/` 目录下，Tauri 打包时会按 `externalBin` 配置取用
+
+### Go 相关要点
+- 三档 build tag：`personal` / `small_business` / `enterprise`。业务代码必须三档都能编译通过
+- `modernc.org/sqlite` 是纯 Go 实现，无 cgo，可交叉编译。不要引入任何 cgo 依赖
+- 测试用 `default` tag（内存存储，快）和 `personal` tag（SQLite，真实配置）各跑一遍
+
+### 前端相关要点
+- 前端代码 Web 和 Tauri 共用一套，通过 `resolveBase()` 运行时判断连接地址
+- 测试用 vitest（node 环境），只测纯函数逻辑；组件测试按需引入 jsdom
 
 ## Feature Development Quality Standards
 
@@ -59,10 +122,14 @@ cargo run
   - End-to-end tests for critical user workflows
 - **Coverage Validation**: Run coverage reports before marking features complete:
   ```bash
-  # Examples by language/framework
+  # Go
+  go test -cover ./...
+  
+  # Frontend
   npm run test:coverage
-  pytest --cov=src tests/ --cov-report=term-missing
-  cargo tarpaulin --out Html
+  
+  # Rust
+  cargo tarpaulin --out Html   # 可选，需要安装 tarpaulin
   ```
 - **Test Quality**: Tests must validate behavior, not just achieve coverage metrics
 - **Test Documentation**: Complex test scenarios must include comments explaining the test strategy
@@ -133,8 +200,9 @@ Before marking ANY feature as complete, verify:
 - [ ] All tests pass with appropriate framework command
 - [ ] Code coverage meets 85% minimum threshold
 - [ ] Coverage report reviewed for meaningful test quality
-- [ ] Code formatted according to project standards
+- [ ] Code formatted according to project standards (gofmt for Go, prettier for JS/TS, cargo fmt for Rust)
 - [ ] Type checking passes (if applicable)
+- [ ] **Rust 代码改动：`cargo check` 通过（修改了 src-tauri/ 或 tauri.conf.json 时）**
 - [ ] All changes committed with conventional commit messages
 - [ ] All commits pushed to remote repository
 - [ ] .ralph/fix_plan.md task marked as complete
