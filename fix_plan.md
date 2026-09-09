@@ -45,6 +45,10 @@ Ralph 每轮循环在此记录：已完成项、踩过的坑、下一步最重�
 linux-amd64 23M / linux-arm64 22M / windows-amd64 24M(PE32+) / darwin-amd64 24M / darwin-arm64 23M；前端 vitest 7/7、tsc 干净、vite build 干净（测试代码不进 bundle）；嵌入包 webui/dist 被 gitignore 由 CI build-frontend.sh 重建。
 
 **CI 已补 Tauri shell 编译检查（2026-09-09）**：ci.yml 新增 `shell` job（push master + PR），装 webkit2gtk-4.1/GTK 系统依赖、setup-node 先 `npm run build`（generate_context! 编译期要嵌入 frontendDist）、dtolnay rust + Swatinem rust-cache，在 src-tauri 跑 `cargo check`。Rust 改动不再只等 release tag 暴露。注意：①未提交 Cargo.lock（本机无 Rust 工具链无法 `cargo generate-lockfile`），CI 每次在 runner 内生成并缓存；有工具链后应提交 lock 以固定依赖图、避免上游 yanked crate 卡住发布；②externalBin 的 sidecar 二进制是打包期（tauri build）才需要，cargo check 不需要。首次 CI 运行即为该 job 的验证；若 generate_context! 对 dist 有额外要求，按报错补构建步骤。
+**【2026-09-10 更正】** 该节判断"externalBin 仅 tauri build 打包期需要、cargo check 不需要"
+**是错的**：tauri-build 2 的 build.rs 无条件按当前 target triple 拷贝 externalBin sidecar，
+缺失即 `exit(1)("<path> does not exist")`，cargo check 同样跑 build.rs。已修 ci.yml
+（见 2026-09-10 条目），下述结论作废。
 
 **唯一剩余项（需人工，CI 无法替代）**：`v*` tag 触发 release.yml 后，在真机（macOS/Linux/Windows）双击安装包验证 Tauri 壳拉起 sidecar、首启就绪、数据落在 per-user app data 目录、安装包体积目标 ~15–25MB；以及代码签名/公证。
 
@@ -68,6 +72,27 @@ a valid date …"（与 visibility/performance 校验同一约定，自动落 40
 （POST 笔误 400 / 长期有效+ISO 201；PATCH 笔误 400 / 中文年月日 200）钉死边界。MCP/CLI 透传
 service 文案不受影响；restore/merge 走 store.Put 不经该校验。再跑 A/B：stash 掉校验后 1000 行
 导入仍 3.17s 超线，坐实超时纯系机器负载。三 tier 编译、default+personal 全量（除 perf 时序）绿。
+
+### 2026-09-10：修复 shell CI job——cargo check 同样要求 sidecar 二进制（此前判断错误，job 一直红）
+
+2026-09-09 加 shell job 时断言"externalBin 仅 `tauri build` 打包期需要，cargo check 不需要"，
+**未在 Rust 环境验证，且是错的**。核查 tauri-build 2 源码（crates/tauri-build/src/lib.rs）：
+`try_build` 对 `bundle.externalBin` **无条件**执行 `copy_binaries`，按当前 TARGET 拼
+`binaries/suppliderd-<triple>` 并 `copy_file`，文件不存在直接 `anyhow!("<path> does not exist")`
+→ build.rs `exit(1)`。而 `src-tauri/binaries/*` 被 gitignore，fresh runner 上目录为空——
+所以 shell job 在每次 push/PR 上必然在 cargo check 阶段失败，Rust 编译检查实际从未生效。
+本机无 Rust 工具链，该问题由 CI 实跑暴露（工作区 ci.yml 的手工修补即对应修复）。本轮核实
+后收口：
+
+- **ci.yml shell job**：runs-on 统一为 ubuntu-22.04（与 release desktop 一致）；npm 用
+  `--prefix frontend`；在 webkit 系统依赖与 cargo check 之前插入 setup-go 1.25 +
+  `bash scripts/build-sidecar.sh`（纯 Go modernc 五 triple 交叉编译，linux runner 即可，
+  check 实际只需当前 x86_64-linux 那一个，全量构建与 release 共用同一脚本、更简单）。
+- 更正 job 尾部自相矛盾的旧注释（原注释还写着 sidecar "not required"）。
+- 本机可验证部分：YAML 合法、五 triple sidecar 实跑全部产出（16–17M stripped）；
+  Go 侧零改动，default+personal 测试与三 tag 编译不受影响。
+- **待下一次 push 由 CI 实证** shell job 转绿；若仍红，下一轮按 GitHub Actions 日志继续修。
+- 未变：仍无 Cargo.lock（本机无 Rust 工具链无法生成），依赖图固定继续后挂。
 
 ### 2026-09-09：srm-mcp 默认数据目录解析加测试，锁死"与桌面 App 同库"
 
