@@ -483,15 +483,22 @@ func (s *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) 
 		writeServiceError(w, err)
 		return
 	}
-	// Document record is gone; now drop the bytes (best-effort — a missing
-	// object is not an error). The key must belong to this supplier.
-	if strings.HasPrefix(key, id+"/") {
+	_ = removed
+	// Reference-counted GC: a merge copies attachment references (bytes
+	// stay under the original supplier's key), so the same object can be
+	// referenced by several documents. Drop the bytes only after the LAST
+	// reference is gone — deleting per-document would leave the surviving
+	// master with a dangling URL. On a scan error, keep the bytes (an orphan
+	// file is recoverable; a wrongly deleted object is not).
+	referenced, refErr := s.Service.AttachmentReferenced(r.Context(), url)
+	if refErr != nil {
+		log.Printf("httpapi: attachment reference scan for %s: %v (keeping bytes)", key, refErr)
+	} else if !referenced {
 		if rmErr := s.Objects.Remove(r.Context(), key); rmErr != nil &&
 			!errors.Is(rmErr, objectstore.ErrObjectNotFound) {
 			log.Printf("httpapi: remove object %s: %v", key, rmErr)
 		}
 	}
-	_ = removed
 	writeJSON(w, http.StatusOK, doc)
 }
 

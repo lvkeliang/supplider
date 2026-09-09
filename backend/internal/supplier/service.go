@@ -263,6 +263,42 @@ func (s *Service) AddAttachment(ctx context.Context, id string, att domain.Attac
 	return doc, nil
 }
 
+// AttachmentReferenced reports whether ANY supplier (including archived
+// ones) still carries an attachment record with this URL. Merge
+// reference-unions attachments, so the same object can be referenced by the
+// surviving master AND the archived duplicate; the wiring layer must only
+// delete the backing bytes after the last reference is gone.
+func (s *Service) AttachmentReferenced(ctx context.Context, url string) (bool, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return false, nil
+	}
+	cursor := ""
+	for {
+		page, err := s.store.List(ctx, datamodel.Query{
+			Filter: datamodel.SupplierFilter{IncludeArchived: true},
+			Limit:  datamodel.MaxPageSize,
+			Cursor: cursor,
+			Sort:   datamodel.Sort{Field: datamodel.SortCreatedAt, Order: datamodel.OrderDesc},
+		})
+		if err != nil {
+			return false, err
+		}
+		for _, d := range page.Items {
+			for _, a := range d.Attachments {
+				if a.URL == url {
+					return true, nil
+				}
+			}
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	return false, nil
+}
+
 // RemoveAttachment detaches one attachment identified by its URL from the
 // document. It returns the removed record (so the wiring layer can delete
 // the backing object bytes) and an error if no attachment carries that URL.
