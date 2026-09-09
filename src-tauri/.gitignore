@@ -2,7 +2,8 @@
 /target
 /gen/schemas
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock IS committed: this is a binary/application crate, and pinning
+# the dependency graph keeps CI/release builds reproducible.
 
 # Go sidecar binaries (produced by scripts/build-sidecar.sh; named with
 # the Rust target triple, e.g. suppliderd-x86_64-pc-windows-msvc.exe)

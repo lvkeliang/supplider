@@ -60,7 +60,10 @@ fn main() {
 
             // Forward sidecar stdout/stderr to the Tauri console.
             thread::spawn(move || {
-                while let Ok(Some(event)) = rx.blocking_recv() {
+                // tauri 2.11+ re-exports tokio::sync::mpsc::Receiver, whose
+                // blocking_recv returns Option<CommandEvent> (None once all
+                // senders — the child process handle — are gone).
+                while let Some(event) = rx.blocking_recv() {
                     match event {
                         CommandEvent::Stdout(bytes) | CommandEvent::Stderr(bytes) => {
                             eprint!("[suppliderd] {}", String::from_utf8_lossy(&bytes));
