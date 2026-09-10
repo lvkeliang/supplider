@@ -31,3 +31,18 @@
     @apply inline-block rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700;
   }
 }
+
+/* Toast entrance (TR-01): slide/fade down from the top center. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.toast-in {
+  animation: toast-in 0.18s ease-out;
+}

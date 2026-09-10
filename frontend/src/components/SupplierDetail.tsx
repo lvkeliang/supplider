@@ -4,6 +4,7 @@ import type { DuplicateMatch, RiskReport, RiskSignal, Supplier } from '../types'
 import { STATUS_ARCHIVED, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import { DocumentCard, Field } from './Card'
 import type { Go } from '../App'
+import { useToast } from './Toast'
 
 /** Tailwind classes + Chinese label for one risk severity. */
 function sevStyle(sev: string): { cls: string; label: string } {
@@ -34,6 +35,7 @@ function SignalRow({ sig }: { sig: RiskSignal }) {
  * render generically (no schema assumed). Archived documents offer restore.
  */
 export function SupplierDetail({ id, go }: { id: string; go: Go }) {
+  const toast = useToast()
   const [doc, setDoc] = useState<Supplier | null>(null)
   const [risk, setRisk] = useState<RiskReport | null>(null)
   const [error, setError] = useState('')
@@ -64,6 +66,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setBusy(true)
     try {
       await api.archiveSupplier(id)
+      toast.success('已归档（列表默认隐藏，历史保留）')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -76,6 +79,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setBusy(true)
     try {
       await api.restoreSupplier(id)
+      toast.success('已恢复到在库')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -97,6 +101,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setError('')
     try {
       await api.reviewRisk(id, outcome)
+      toast.success(outcome === 'verified' ? '已标记为「已核验」' : '风险信号已忽略，清出审核队列')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -113,6 +118,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setError('')
     try {
       await api.blacklistSupplier(id, reason.trim())
+      toast.success('已列入黑名单')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -127,6 +133,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setError('')
     try {
       await api.unblacklistSupplier(id)
+      toast.success('已移出黑名单，恢复在库')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -144,6 +151,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setError('')
     try {
       await api.watchSupplier(id, next)
+      toast.success(next ? '已关注，风险/变更将在铃铛通知' : '已取消关注')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -201,7 +209,9 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
       setMergeOpen(false)
       load()
       const m = res.merged
-      alert(`合并完成：并入绩效 ${m.performance_added}、附件 ${m.attachments_added}、资质 ${m.qualifications_added}、品类 ${m.categories_added} 条；「${dup.name}」已归档。`)
+      toast.success(
+        `合并完成：并入绩效 ${m.performance_added}、附件 ${m.attachments_added}、资质 ${m.qualifications_added}、品类 ${m.categories_added} 条；「${dup.name}」已归档。`,
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -219,6 +229,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setError('')
     try {
       await api.appealVisibility(id, note.trim())
+      toast.success('申诉已提交，自动降级已暂停，等待管理员裁决')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -237,6 +248,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setError('')
     try {
       await api.uploadAttachment(id, file)
+      toast.success(`附件「${file.name}」已上传`)
       load() // refresh so the new attachment appears
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -251,6 +263,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     setError('')
     try {
       await api.deleteAttachment(id, url)
+      toast.success('附件已删除')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

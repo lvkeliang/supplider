@@ -47,7 +47,7 @@
 
 ### P0 — 立即修复（用户体验地基）
 
-- [ ] **TR-01 全局 Toast/通知基础设施**：应用不存在 Toast 组件，所有写操作（创建/编辑/黑名单/归档）成功后无反馈。引入轻量 Toast（`ToastProvider` + Context + Portal，约 40 行零依赖），所有 `submit()` 成功后 `toast('✓ 操作成功')`。涉及 `App.tsx` 全局
+- [x] **TR-01 全局 Toast/通知基础设施**：应用不存在 Toast 组件，所有写操作（创建/编辑/黑名单/归档）成功后无反馈。引入轻量 Toast（`ToastProvider` + Context + Portal，约 40 行零依赖），所有 `submit()` 成功后 `toast('✓ 操作成功')`。涉及 `App.tsx` 全局——2026-09-10
 - [ ] **TR-02 所有下载操作添加反馈**：4 个下载入口（Excel 模板/导出 Excel/JSON 备份/zip 备份）全部零反馈。用 `fetch()` + `Blob` 替代 `a.click()` 可追踪下载完成，下载前 `toast('⬇ 准备中…')`，完成后 `toast('✓ 下载完成')`。涉及 `SupplierList.tsx`/`ImportView.tsx`/`SettingsView.tsx`
 - [ ] **TR-03 搜索框改为受控组件**：`defaultValue` → `value`（受控）+ 300ms 防抖即时搜索 + 🔍 搜索按钮 + ✕ 清除按钮 + placeholder 改为"搜索公司名/信用代码/法人/品类…（输入即搜索）"。涉及 `SupplierList.tsx`
 

@@ -3,6 +3,7 @@ import { api } from '../api'
 import type { BasicInfo, DuplicateMatch, Qualification, ProductService, Performance, Supplier } from '../types'
 import { QUAL_LEVELS, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import type { Go } from '../App'
+import { useToast } from './Toast'
 
 // 文档式录入:固定核心字段 + 可自由增删的自定义字段(不预定义字段名/类型)。
 // 资质/产品/绩效也是可增删的行,贴合施工商记资质设备、贸易商记品牌规格的差异。
@@ -59,6 +60,7 @@ function fromSupplier(s: Supplier): FormState {
 }
 
 export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string; visibilityLevels: number }) {
+  const toast = useToast()
   const editing = !!id
   const [form, setForm] = useState<FormState>(() => emptyForm(visibilityLevels))
   const [loading, setLoading] = useState(editing)
@@ -143,9 +145,11 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
     try {
       if (editing && id) {
         await api.updateSupplier(id, body)
+        toast.success('供应商信息已保存')
         go({ name: 'detail', id })
       } else {
         const created = await api.createSupplier({ owner: form.owner || undefined, ...body })
+        toast.success(`已创建供应商「${form.basic.company_name.trim()}」`)
         go({ name: 'detail', id: created.id })
       }
     } catch (e) {
