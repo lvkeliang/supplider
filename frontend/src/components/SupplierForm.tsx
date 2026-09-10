@@ -19,6 +19,7 @@ import {
   splitSupplierType,
   type SupplierTypeChoice,
 } from '../supplierType'
+import { normalizeEstablishmentDate } from '../date'
 
 // 文档式录入:固定核心字段 + 可自由增删的自定义字段(不预定义字段名/类型)。
 // 资质/产品/绩效也是可增删的行,贴合施工商记资质设备、贸易商记品牌规格的差异。
@@ -40,6 +41,8 @@ interface FormState {
   visibility: number
   /** Supplier-type select state (basic.supplier_type is composed from it). */
   typeChoice: SupplierTypeChoice
+  /** Raw text of the establishment-date box; normalised to ISO on submit. */
+  estDateText: string
 }
 
 function emptyForm(visibilityLevels: number): FormState {
@@ -56,6 +59,7 @@ function emptyForm(visibilityLevels: number): FormState {
     custom: [],
     visibility: Math.min(0, visibilityLevels - 1),
     typeChoice: { category: '', custom: '' },
+    estDateText: '',
   }
 }
 
@@ -87,6 +91,12 @@ function fromSupplier(s: Supplier): FormState {
     custom,
     visibility: s.visibility ?? 0,
     typeChoice: splitSupplierType(s.basic_info.supplier_type),
+    // Canonicalise a parseable legacy date for display; keep unparseable raw.
+    estDateText: (() => {
+      const raw = s.basic_info.establishment_date ?? ''
+      const n = normalizeEstablishmentDate(raw)
+      return n === null ? raw : n
+    })(),
   }
 }
 
@@ -180,11 +190,18 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
     if (form.typeChoice.category === OTHER_TYPE && !form.typeChoice.custom.trim())
       return setError('选择「其他」类型时请填写具体类型')
 
+    // Normalise pasted/typed dates; an unparseable value is passed through
+    // unchanged (Excel imports can already contain such legacy strings, and
+    // the backend tolerates free text — never block editing those records).
+    const parsedEst = normalizeEstablishmentDate(form.estDateText)
+    const estDate = parsedEst === null ? form.estDateText.trim() : parsedEst
+
     const categories = form.categoriesText.split(/[,，、\s]+/).map((s) => s.trim()).filter(Boolean)
     const body = {
       basic_info: {
         ...form.basic,
         supplier_type: composeSupplierType(form.typeChoice) || undefined,
+        establishment_date: estDate || undefined,
       },
       categories,
       qualifications: form.quals.filter((q) => q.type.trim()),
@@ -292,8 +309,31 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
           </div>
           <div>
             <label className="label">成立日期</label>
-            <input className="input" type="date" value={form.basic.establishment_date ?? ''}
-              onChange={(e) => setBasic({ establishment_date: e.target.value })} />
+            <input
+              className="input"
+              type="text"
+              inputMode="numeric"
+              placeholder="2005-03-15（可直接粘贴企查查格式）"
+              title="支持 2005-03-15 / 2005/3/15 / 2005.3.15 / 2005年3月15日"
+              value={form.estDateText}
+              onChange={(e) => setForm((f) => ({ ...f, estDateText: e.target.value }))}
+              onPaste={(e) => {
+                // Normalize 企查查/天眼查-style pastes in place immediately.
+                const text = e.clipboardData.getData('text')
+                e.preventDefault()
+                const iso = normalizeEstablishmentDate(text)
+                if (iso !== null) {
+                  setForm((f) => ({ ...f, estDateText: iso }))
+                } else {
+                  setForm((f) => ({ ...f, estDateText: text }))
+                  toast.error('未识别的日期格式，可手动改为 2005-03-15')
+                }
+              }}
+              onBlur={(e) => {
+                const iso = normalizeEstablishmentDate(e.target.value)
+                if (iso) setForm((f) => ({ ...f, estDateText: iso }))
+              }}
+            />
           </div>
           <div>
             <label className="label">供应商类型</label>
