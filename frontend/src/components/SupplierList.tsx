@@ -160,6 +160,10 @@ export function SupplierList({ go }: { go: Go }) {
 
   return (
     <div className="space-y-4">
+      {/* Sticky band: title + search/filter stay under the global header
+          while the long supplier list scrolls (TR-09). Page-bg fill hides
+          rows passing underneath. */}
+      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 space-y-3 bg-slate-50 px-4 pb-3 pt-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-slate-800">供应商</h1>
         <div className="flex gap-2">
@@ -281,6 +285,7 @@ export function SupplierList({ go }: { go: Go }) {
             </label>
           )}
         </div>
+      </div>
       </div>
 
       {reminders && (

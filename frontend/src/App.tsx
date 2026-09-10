@@ -180,7 +180,7 @@ export default function App() {
     // gateKey remounts the whole business tree when a lost session returns,
     // forcing every view (and the bell) to refetch from scratch.
     <div className="min-h-screen" key={gateKey}>
-      <header className="border-b border-slate-200 bg-white">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <button
             onClick={() => go({ name: 'list' })}

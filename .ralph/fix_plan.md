@@ -59,10 +59,10 @@
 - [x] **TR-05 供应商类型选项扩展**：当前仅 6 项 `<datalist>`，改为 `<select>` 9 大分类（施工承包/设计咨询/物资供应/设备租赁/物流运输/检测认证/技术服务/劳务服务/其他）+ 选"其他"展开自由文本。涉及 `SupplierForm.tsx`——2026-09-10
 - [x] **TR-06 成立日期智能粘贴**：当前 `<input type="date">` 仅接受 ISO 格式，粘贴企查查格式"2005年3月15日"被拒绝。改为 `<input type="text">` + `onPaste` 正则归一化（支持 ISO/斜杠/点号/中文/天眼查 API 格式）。涉及 `SupplierForm.tsx`——2026-09-10
 - [x] **TR-07 统一应用内 Logo 与桌面图标**：应用内是纯色方块+"供"字（CSS 文本），桌面图标是渐变层叠文档卡片（`genicons` Go 程序生成），品牌断裂。新建 `Logo.tsx` 组件用内联 SVG 复现 `genicons` 设计，替换 `App.tsx` 中的 `<span>供</span>`，同时作 Favicon——2026-09-10
-- [ ] **TR-08 全局 Header 粘性固定**：所有 5 个页面滚动后顶部 Header 消失。`<header>` 添加 `sticky top-0 z-50`。涉及 `App.tsx`
-- [ ] **TR-09 列表页搜索/筛选栏粘性固定**：滚动后搜索框和筛选条件消失。标题行+筛选栏包裹在 `sticky top-[57px] z-40 bg-slate-50` 容器中。涉及 `SupplierList.tsx`
-- [ ] **TR-10 详情页操作按钮栏粘性固定**：滚动后编辑/归档/黑名单等按钮消失。标题+操作按钮容器添加 `sticky top-[57px] z-40 bg-white`。涉及 `SupplierDetail.tsx`
-- [ ] **TR-11 表单页标题栏粘性固定**：滚动后标题和取消按钮消失。标题栏添加 `sticky top-[57px] z-40 bg-slate-50 py-2`。涉及 `SupplierForm.tsx`
+- [x] **TR-08 全局 Header 粘性固定**：所有 5 个页面滚动后顶部 Header 消失。`<header>` 添加 `sticky top-0 z-50`。涉及 `App.tsx`——2026-09-10
+- [x] **TR-09 列表页搜索/筛选栏粘性固定**：滚动后搜索框和筛选条件消失。标题行+筛选栏包裹在 `sticky top-[57px] z-40 bg-slate-50` 容器中。涉及 `SupplierList.tsx`——2026-09-10
+- [x] **TR-10 详情页操作按钮栏粘性固定**：滚动后编辑/归档/黑名单等按钮消失。标题+操作按钮容器添加 `sticky top-[57px] z-40 bg-white`。涉及 `SupplierDetail.tsx`——2026-09-10
+- [x] **TR-11 表单页标题栏粘性固定**：滚动后标题和取消按钮消失。标题栏添加 `sticky top-[57px] z-40 bg-slate-50 py-2`。涉及 `SupplierForm.tsx`——2026-09-10
 - [ ] **TR-12 React Error Boundary**：应用无 Error Boundary，单个组件渲染错误导致白屏。在 App 根节点包裹 `ErrorBoundary`，捕获后显示友好错误页 + 重试按钮。涉及 `App.tsx`
 - [ ] **TR-13 长表单锚点导航**：新建/编辑表单 9 个分区内容长，无快速跳转。左侧 sticky 锚点导航或顶部进度条，点击跳转到对应分区。涉及 `SupplierForm.tsx`
 - [ ] **TR-14 DocumentCard 折叠/展开动画**：当前直接切换 `display` 无过渡。用 `max-height` CSS 过渡或 `react-transition-group` 实现平滑展开。涉及 `Card.tsx`

@@ -237,9 +237,16 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Sticky title bar with cancel/save reachable while the long form
+          scrolls (TR-11). */}
+      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 flex items-center justify-between bg-slate-50 px-4 py-2">
         <h1 className="text-xl font-semibold text-slate-800">{editing ? '编辑供应商' : '新建供应商'}</h1>
-        <button className="btn-ghost" onClick={cancel}>取消</button>
+        <div className="flex gap-2">
+          <button className="btn-ghost" onClick={cancel}>取消</button>
+          <button className="btn-primary" disabled={saving} onClick={submit}>
+            {saving ? '保存中…' : editing ? '保存修改' : '创建供应商'}
+          </button>
+        </div>
       </div>
 
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}

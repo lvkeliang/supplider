@@ -282,7 +282,9 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-3">
-      {/* Header */}
+      {/* Sticky header: title + lifecycle actions stay under the global
+          header while the document cards scroll (TR-10). */}
+      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 bg-slate-50 px-4 pb-2 pt-4">
       <div className="flex items-start gap-3">
         <div>
           <button className="text-sm text-slate-400 hover:text-slate-600" onClick={() => go({ name: 'list' })}>
@@ -325,6 +327,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
             </>
           )}
         </div>
+      </div>
       </div>
 
       {/* 合并重复档案选择器：查重候选 + 手动 id 兜底 */}
