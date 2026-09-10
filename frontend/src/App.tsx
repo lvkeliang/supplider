@@ -8,6 +8,7 @@ import { ImportView } from './components/ImportView'
 import { SettingsView } from './components/SettingsView'
 import { CompareView } from './components/CompareView'
 import { NotificationBell } from './components/NotificationBell'
+import { Logo } from './components/Logo'
 
 // Minimal in-app router (no extra dependency): the desktop MVP has a handful
 // of screens. Tauri/web history is not needed for the seed milestone.
@@ -185,7 +186,7 @@ export default function App() {
             onClick={() => go({ name: 'list' })}
             className="flex items-center gap-2 text-lg font-semibold text-slate-800"
           >
-            <span className="grid h-8 w-8 place-items-center rounded-md bg-brand-600 text-white">供</span>
+            <Logo size={32} />
             Supplider
           </button>
           <span className="text-sm text-slate-400">供应商资源管理</span>
@@ -257,9 +258,7 @@ function BootScreen({
   return (
     <div className="grid min-h-screen place-items-center px-4">
       <div className="w-full max-w-sm text-center">
-        <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-lg bg-brand-600 text-xl font-semibold text-white">
-          供
-        </div>
+        <Logo size={48} className="mx-auto mb-4" />
         {spinner && (
           <div className="mx-auto mb-4 h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
         )}
