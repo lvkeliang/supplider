@@ -65,7 +65,7 @@
 - [x] **TR-11 表单页标题栏粘性固定**：滚动后标题和取消按钮消失。标题栏添加 `sticky top-[57px] z-40 bg-slate-50 py-2`。涉及 `SupplierForm.tsx`——2026-09-10
 - [x] **TR-12 React Error Boundary**：应用无 Error Boundary，单个组件渲染错误导致白屏。在 App 根节点包裹 `ErrorBoundary`，捕获后显示友好错误页 + 重试按钮。涉及 `App.tsx`——2026-09-10
 - [x] **TR-13 长表单锚点导航**：新建/编辑表单 9 个分区内容长，无快速跳转。左侧 sticky 锚点导航或顶部进度条，点击跳转到对应分区。涉及 `SupplierForm.tsx`——2026-09-10
-- [ ] **TR-14 DocumentCard 折叠/展开动画**：当前直接切换 `display` 无过渡。用 `max-height` CSS 过渡或 `react-transition-group` 实现平滑展开。涉及 `Card.tsx`
+- [x] **TR-14 DocumentCard 折叠/展开动画**：当前直接切换 `display` 无过渡。用 `max-height` CSS 过渡或 `react-transition-group` 实现平滑展开。涉及 `Card.tsx`——2026-09-10
 
 ### P2 — 后续打磨
 

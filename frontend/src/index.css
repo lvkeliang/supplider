@@ -52,3 +52,23 @@
 .form-section {
   scroll-margin-top: 150px;
 }
+
+/* TR-14: DocumentCard collapse/expand. grid-template-rows 0fr↔1fr animates
+   to content height with no JS measurement; the inner div clips overflow. */
+.card-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s ease;
+}
+.card-collapse.open {
+  grid-template-rows: 1fr;
+}
+.card-collapse > div {
+  min-height: 0;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-collapse {
+    transition: none;
+  }
+}
