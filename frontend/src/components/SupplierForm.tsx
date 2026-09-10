@@ -4,6 +4,14 @@ import type { BasicInfo, DuplicateMatch, Qualification, ProductService, Performa
 import { QUAL_LEVELS, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import type { Go } from '../App'
 import { useToast } from './Toast'
+import {
+  PROVINCES,
+  canonicalizeCity,
+  canonicalizeProvince,
+  citiesOf,
+  districtsOf,
+  splitRegion,
+} from '../regions'
 
 // 文档式录入:固定核心字段 + 可自由增删的自定义字段(不预定义字段名/类型)。
 // 资质/产品/绩效也是可增删的行,贴合施工商记资质设备、贸易商记品牌规格的差异。
@@ -49,7 +57,19 @@ function fromSupplier(s: Supplier): FormState {
   })
   return {
     owner: s.owner ?? '',
-    basic: { ...s.basic_info, region: { ...s.basic_info.region } },
+    basic: {
+      ...s.basic_info,
+      // Normalise legacy full-suffix values to the cascader's short names;
+      // unknown values are preserved as-is and shown as an extra option.
+      region: {
+        province: canonicalizeProvince(s.basic_info.region.province),
+        city: canonicalizeCity(
+          s.basic_info.region.city,
+          canonicalizeProvince(s.basic_info.region.province),
+        ),
+        district: s.basic_info.region.district ?? '',
+      },
+    },
     categoriesText: (s.categories ?? []).join(', '),
     quals: (s.qualifications ?? []).map((q) => ({ ...q })),
     products: (s.products_services ?? []).map((p) => ({ ...p })),
@@ -109,6 +129,24 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
     setForm((f) => ({ ...f, basic: { ...f.basic, ...patch } }))
   const setRegion = (patch: Partial<BasicInfo['region']>) =>
     setForm((f) => ({ ...f, basic: { ...f.basic, region: { ...f.basic.region, ...patch } } }))
+
+  // 整段地址粘贴（企查查/天眼查复制）：按已知省/市/区拆分后联动填充。
+  const [regionPaste, setRegionPaste] = useState('')
+  const applyRegionPaste = (raw: string) => {
+    const parts = splitRegion(raw)
+    if (!parts.province) {
+      toast.error('未识别出省/直辖市，请手动选择或检查地址文本')
+      return
+    }
+    setRegion({
+      province: parts.province,
+      city: parts.city ?? (citiesOf(parts.province).length === 1 ? citiesOf(parts.province)[0] : ''),
+      district: parts.district ?? '',
+    })
+    toast.success(
+      `已识别：${[parts.province, parts.city, parts.district].filter(Boolean).join(' · ')}`,
+    )
+  }
 
   const buildCustomFields = (): Record<string, unknown> => {
     const out: Record<string, unknown> = {}
@@ -295,16 +333,76 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
         </div>
       </section>
 
-      {/* 地域 */}
+      {/* 地域（省/市/区县级联，避免错字破坏本地优先排序；支持整段粘贴拆分） */}
       <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700">地域 *（本地供应商偏好）</h2>
+        <input
+          className="input"
+          placeholder="可粘贴整段地址自动拆分，如：浙江省杭州市西湖区文三路…"
+          value={regionPaste}
+          onChange={(e) => setRegionPaste(e.target.value)}
+          onPaste={(e) => {
+            const text = e.clipboardData.getData('text')
+            e.preventDefault()
+            setRegionPaste(text)
+            applyRegionPaste(text)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              applyRegionPaste(regionPaste)
+            }
+          }}
+        />
         <div className="grid grid-cols-3 gap-3">
-          <input className="input" placeholder="省 *（浙江）" value={form.basic.region.province}
-            onChange={(e) => setRegion({ province: e.target.value })} />
-          <input className="input" placeholder="市 *（杭州）" value={form.basic.region.city}
-            onChange={(e) => setRegion({ city: e.target.value })} />
-          <input className="input" placeholder="区/县（西湖区）" value={form.basic.region.district ?? ''}
-            onChange={(e) => setRegion({ district: e.target.value })} />
+          <select
+            className="input"
+            value={form.basic.region.province}
+            onChange={(e) => {
+              const p = e.target.value
+              const cs = citiesOf(p)
+              // Direct municipalities have a single self-named city level.
+              setRegion({ province: p, city: cs.length === 1 ? cs[0] : '', district: '' })
+            }}
+          >
+            <option value="">省/直辖市 *</option>
+            {!PROVINCES.includes(form.basic.region.province) && form.basic.region.province && (
+              <option value={form.basic.region.province}>{form.basic.region.province}（原值）</option>
+            )}
+            {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select
+            className="input"
+            value={form.basic.region.city}
+            onChange={(e) => setRegion({ city: e.target.value, district: '' })}
+            disabled={!form.basic.region.province}
+          >
+            <option value="">市 *</option>
+            {!citiesOf(form.basic.region.province).includes(form.basic.region.city) &&
+              form.basic.region.city && (
+                <option value={form.basic.region.city}>{form.basic.region.city}（原值）</option>
+              )}
+            {citiesOf(form.basic.region.province).map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select
+            className="input"
+            value={form.basic.region.district ?? ''}
+            onChange={(e) => setRegion({ district: e.target.value })}
+            disabled={!form.basic.region.city}
+          >
+            <option value="">区/县（不限）</option>
+            {!districtsOf(form.basic.region.province, form.basic.region.city).includes(
+              form.basic.region.district ?? '',
+            ) &&
+              form.basic.region.district && (
+                <option value={form.basic.region.district}>
+                  {form.basic.region.district}（原值）
+                </option>
+              )}
+            {districtsOf(form.basic.region.province, form.basic.region.city).map((d) => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
         </div>
       </section>
 

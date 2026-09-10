@@ -55,7 +55,7 @@
 
 ### P1 — 下一迭代（表单可用性 + 品牌一致性 + 布局固定）
 
-- [ ] **TR-04 地域填写省市级联选择器**：当前 3 个纯文本 `<input>` 无级联无校验，可输入"火星"。改用 `chinese_regions` 数据包 + 三个级联 `<select>`；可选 `onPaste` 正则拆分整段地址。涉及 `SupplierForm.tsx`
+- [x] **TR-04 地域填写省市级联选择器**：当前 3 个纯文本 `<input>` 无级联无校验，可输入"火星"。改用 `chinese_regions` 数据包 + 三个级联 `<select>`；可选 `onPaste` 正则拆分整段地址。涉及 `SupplierForm.tsx`——2026-09-10
 - [ ] **TR-05 供应商类型选项扩展**：当前仅 6 项 `<datalist>`，改为 `<select>` 9 大分类（施工承包/设计咨询/物资供应/设备租赁/物流运输/检测认证/技术服务/劳务服务/其他）+ 选"其他"展开自由文本。涉及 `SupplierForm.tsx`
 - [ ] **TR-06 成立日期智能粘贴**：当前 `<input type="date">` 仅接受 ISO 格式，粘贴企查查格式"2005年3月15日"被拒绝。改为 `<input type="text">` + `onPaste` 正则归一化（支持 ISO/斜杠/点号/中文/天眼查 API 格式）。涉及 `SupplierForm.tsx`
 - [ ] **TR-07 统一应用内 Logo 与桌面图标**：应用内是纯色方块+"供"字（CSS 文本），桌面图标是渐变层叠文档卡片（`genicons` Go 程序生成），品牌断裂。新建 `Logo.tsx` 组件用内联 SVG 复现 `genicons` 设计，替换 `App.tsx` 中的 `<span>供</span>`，同时作 Favicon
