@@ -84,9 +84,13 @@ type SupplierFilter struct {
 	// at this rank or higher. Compare with domain.QualRank("二级").
 	MinQualRank int
 
-	// Rating range (评分); 0 means "no bound".
-	MinRating float64
-	MaxRating float64
+	// Rating range (评分). Absent bounds are not applied. MaxRatingSet makes
+	// an explicit max_rating=0 ("unrated only") distinguishable from no
+	// bound, since 0 is the float zero value. MinRating=0 needs no predicate
+	// (every rating is >= 0), so it needs no presence flag.
+	MinRating   float64
+	MaxRating   float64
+	MaxRatingSet bool
 
 	// OwnerID restricts to suppliers owned by this user.
 	OwnerID string

@@ -139,9 +139,11 @@ function compact(
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(params)) {
-    // Empty string, false and numeric 0 all mean "unset" on the backend
-    // (0 is the default/no-filter value for ratings and limit).
-    if (v === undefined || v === '' || v === false || v === 0) continue
+    // Only undefined / empty string / false mean "unset". A numeric 0 is a
+    // real value: max_rating=0 is "unrated only" (the backend distinguishes
+    // an explicit 0 from an absent bound via a presence flag). min_rating=0
+    // simply matches everything. Dropping 0 here silently broke those.
+    if (v === undefined || v === '' || v === false) continue
     out[k] = String(v)
   }
   return out

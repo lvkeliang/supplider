@@ -34,12 +34,16 @@ describe('listQuery', () => {
     })
   })
 
-  it('omits empty/zero/false values', () => {
-    const q = listQuery({ province: '', min_rating: 0, watched: false, include_archived: false })
+  it('omits empty/false values but keeps numeric 0 (an explicit bound)', () => {
+    const q = listQuery({ province: '', watched: false, include_archived: false })
     expect(q).not.toHaveProperty('province')
-    expect(q).not.toHaveProperty('min_rating')
     expect(q).not.toHaveProperty('watched')
     expect(q).not.toHaveProperty('include_archived')
+  })
+
+  it('serializes rating bound 0 (min=0 matches all; max=0 is unrated-only)', () => {
+    expect(listQuery({ min_rating: 0 }).min_rating).toBe('0')
+    expect(filterQuery({ max_rating: 0 }).max_rating).toBe('0')
   })
 
   it('sends prefer=0 only when local-first is explicitly disabled', () => {

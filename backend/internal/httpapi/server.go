@@ -765,6 +765,9 @@ func filterFromQuery(q url.Values) (datamodel.SupplierFilter, error) {
 		MinQualRank:     minQual,
 		MinRating:       minRating,
 		MaxRating:       maxRating,
+		// Presence (not value): an explicit max_rating=0 means
+		// "unrated only", distinct from the parameter being absent.
+		MaxRatingSet:    q.Has("max_rating"),
 		OwnerID:         q.Get("owner"),
 		VisibilityMax:   visMax,
 		Status:          q.Get("status"),

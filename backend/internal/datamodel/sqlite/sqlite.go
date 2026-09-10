@@ -489,7 +489,7 @@ func buildWhere(f datamodel.SupplierFilter) ([]string, []any) {
 	if f.MinRating > 0 {
 		add("s.rating >= ?", f.MinRating)
 	}
-	if f.MaxRating > 0 {
+	if f.MaxRatingSet {
 		add("s.rating <= ?", f.MaxRating)
 	}
 	if f.OwnerID != "" {
