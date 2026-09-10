@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { api, apiUrl } from '../api'
+import { api } from '../api'
 import type { ImportReport, Inspection } from '../types'
 import { VIS_LABELS, STATUS_BLACKLISTED, STATUS_ARCHIVED } from '../types'
 import type { Go } from '../App'
+import { useToast } from './Toast'
 
 /**
  * Excel 批量导入 — manual column mapping (AI smart-mapping is a later,
@@ -13,6 +14,7 @@ import type { Go } from '../App'
  * per-row report. Invalid rows are reported without aborting valid ones.
  */
 export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels: number }) {
+  const toast = useToast()
   const [file, setFile] = useState<File | null>(null)
   const [insp, setInsp] = useState<Inspection | null>(null)
   const [mapping, setMapping] = useState<Record<string, string>>({})
@@ -54,6 +56,18 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
     }
   }
 
+  // Fetch the template as a Blob (TR-02) so a broken/missing file is shown
+  // as a toast instead of a silent or navigated-away anchor download.
+  const downloadTemplate = async () => {
+    toast.info('⬇ 正在准备导入模板…')
+    try {
+      const name = await api.download('/api/v1/import/template', '供应商导入模板.xlsx')
+      toast.success(`✓ 已下载「${name}」`)
+    } catch (e) {
+      toast.error(`模板下载失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   const setMap = (col: number, key: string) =>
     setMapping((m) => ({ ...m, [String(col)]: key }))
 
@@ -74,9 +88,13 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
       {/* Step 1: template + file */}
       <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
-          <a className="btn-ghost" href={apiUrl('/api/v1/import/template')}>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => void downloadTemplate()}
+          >
             ⬇ 下载导入模板（.xlsx）
-          </a>
+          </button>
           <label className="btn-primary cursor-pointer">
             选择 Excel 文件
             <input

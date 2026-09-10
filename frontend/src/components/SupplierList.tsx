@@ -3,6 +3,7 @@ import { api, type ListParams } from '../api'
 import type { ExpiringReport, LocalPreference, ShellRiskReport, SupplierSummary } from '../types'
 import { QUAL_LEVELS, STATUS_ARCHIVED, STATUS_BLACKLISTED } from '../types'
 import type { Go } from '../App'
+import { useToast } from './Toast'
 
 /** Chinese tag + tailwind classes for one risk severity. */
 function severityTag(sev: string): { label: string; cls: string } {
@@ -37,6 +38,7 @@ function expiryTag(bucket: string): string {
  * line of ≤100 rows/page, no OFFSET).
  */
 export function SupplierList({ go }: { go: Go }) {
+  const toast = useToast()
   const [params, setParams] = useState<ListParams>({ limit: 20 })
   const [items, setItems] = useState<SupplierSummary[]>([])
   const [cursor, setCursor] = useState<string | undefined>(undefined)
@@ -118,16 +120,23 @@ export function SupplierList({ go }: { go: Go }) {
 
   const set = (patch: Partial<ListParams>) => setParams((p) => ({ ...p, ...patch }))
 
-  // Export the CURRENT filter view: the server streams an attachment
-  // (Content-Disposition), so a hidden anchor click downloads without
-  // leaving the app. JSON = full-fidelity backup bundle; XLSX = exchange
-  // workbook round-trippable through the Excel importer.
-  const downloadExport = (format: 'json' | 'xlsx') => {
-    const a = document.createElement('a')
-    a.href = api.exportUrl(params, format)
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
+  // Export the CURRENT filter view. Fetch as a Blob (instead of a
+  // fire-and-forget anchor) so the transfer is tracked: preparing → done
+  // with the real filename → failure, all via toast (TR-02). JSON =
+  // full-fidelity backup bundle; XLSX = exchange workbook round-trippable
+  // through the Excel importer.
+  const downloadExport = async (format: 'json' | 'xlsx') => {
+    const label = format === 'xlsx' ? 'Excel' : 'JSON'
+    toast.info(`⬇ 正在准备${label}导出…`)
+    try {
+      const name = await api.download(
+        api.exportUrl(params, format),
+        format === 'xlsx' ? 'suppliers.xlsx' : 'suppliers.json',
+      )
+      toast.success(`✓ 已下载「${name}」`)
+    } catch (e) {
+      toast.error(`${label}导出失败：${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   return (

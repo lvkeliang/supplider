@@ -43,6 +43,11 @@ func CORS(next http.Handler) http.Handler {
 			h.Set("Vary", "Origin")
 			h.Add("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 			h.Add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			// The desktop UI downloads exports/backups/templates via
+			// fetch()+Blob (TR-02) and reads the server-provided filename
+			// from Content-Disposition; cross-origin JS can only see
+			// headers explicitly exposed here.
+			h.Set("Access-Control-Expose-Headers", "Content-Disposition")
 			h.Set("Access-Control-Max-Age", "86400")
 		}
 		// Preflight: answer directly, never reach business handlers.

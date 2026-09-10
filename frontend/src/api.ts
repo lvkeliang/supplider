@@ -244,11 +244,27 @@ export const api = {
     request<{ ok: boolean }>('POST', '/api/v1/notifications/read-all'),
 
   // Download URL for exporting the current filter view. `format` is 'json'
-  // (full-fidelity backup bundle) or 'xlsx' (exchange workbook). The server
-  // answers with Content-Disposition: attachment, so navigating to the URL
-  // (or clicking a hidden anchor) starts a download without leaving the app.
+  // (full-fidelity backup bundle) or 'xlsx' (exchange workbook). Feed the
+  // result to api.download() so the fetch is tracked (toast start/done/fail).
   exportUrl: (p: ListParams, format: 'json' | 'xlsx') =>
     withQuery('/api/v1/export', { ...filterQuery(p), format }),
+
+  // Streamed downloads (import template / filtered export / full backup):
+  // fetch as a Blob and trigger the browser save, so callers know when the
+  // transfer actually finished (a fire-and-forget anchor click does not).
+  // Resolves with the effective filename; rejects on HTTP errors like any
+  // other call so the UI can toast the failure.
+  download: async (path: string, fallbackName: string): Promise<string> => {
+    const res = await guardedFetch(path)
+    if (!res.ok) {
+      const data = await res.json().catch(() => undefined)
+      throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
+    }
+    const blob = await res.blob()
+    const name = filenameFromDisposition(res.headers.get('Content-Disposition'), fallbackName)
+    saveBlob(blob, name)
+    return name
+  },
 
   // Pre-entry duplicate check (录入去重): strong on credit code, probable on
   // normalized name; includes blacklisted/archived records. Non-blocking.
@@ -402,6 +418,45 @@ export const api = {
 /** Prefix a stored relative URL (attachment/template path) with the API base. */
 export function apiUrl(relPath: string): string {
   return BASE + relPath
+}
+
+/**
+ * Extract a download filename from Content-Disposition, preferring the RFC
+ * 5987 `filename*=UTF-8''…` form (the sidecar uses it for Chinese names),
+ * then the legacy quoted `filename="…"`, then the caller's fallback.
+ * Pure so the parsing contract is unit-testable.
+ */
+export function filenameFromDisposition(
+  disposition: string | null | undefined,
+  fallback: string,
+): string {
+  if (disposition) {
+    const star = /filename\*\s*=\s*([^']+)'([^']*)'([^;]+)/i.exec(disposition)
+    if (star?.[3]) {
+      try {
+        return decodeURIComponent(star[3].trim())
+      } catch {
+        // Malformed percent-encoding — fall through to legacy/fallback.
+      }
+    }
+    const plain = /filename\s*=\s*"?([^";]+?)"?(?:;|$)/i.exec(disposition)
+    if (plain?.[1]) return plain[1].trim()
+  }
+  return fallback
+}
+
+/** Trigger a browser save for an in-memory Blob, then release its object URL. */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // The browser claims the blob synchronously on click; revoke shortly after
+  // so WebKit-based webviews have time to pick it up.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export { ApiError }

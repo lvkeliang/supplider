@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterQuery, listQuery, type ListParams } from './api'
+import { filenameFromDisposition, filterQuery, listQuery, type ListParams } from './api'
 
 // These serializers build EVERY list/export URL. A wrong/missing key would
 // silently disable a filter on the backend (which now strictly rejects bad
@@ -72,5 +72,32 @@ describe('filterQuery (export)', () => {
 
   it('preserves the qual level for hard-filtered exports', () => {
     expect(filterQuery({ min_qual_level: '一级' })).toEqual({ min_qual_level: '一级' })
+  })
+})
+
+// The fetch()+Blob download (TR-02) reads the filename from the sidecar's
+// Content-Disposition; cross-origin Tauri needs the CORS expose header and
+// the parser must handle the RFC 5987 Chinese-name form the Go handlers emit.
+describe('filenameFromDisposition', () => {
+  it('decodes the RFC 5987 filename* form (Chinese names)', () => {
+    const cd = `attachment; filename="template.xlsx"; filename*=UTF-8''${encodeURIComponent('供应商导入模板.xlsx')}`
+    expect(filenameFromDisposition(cd, 'fallback.xlsx')).toBe('供应商导入模板.xlsx')
+  })
+
+  it('prefers filename* even when a legacy filename precedes it', () => {
+    const cd = `attachment; filename="download"; filename*=UTF-8''back%20up.zip`
+    expect(filenameFromDisposition(cd, 'fb.zip')).toBe('back up.zip')
+  })
+
+  it('falls back to the quoted legacy filename', () => {
+    expect(filenameFromDisposition('attachment; filename="data.json";', 'fb.json')).toBe('data.json')
+  })
+
+  it('uses the fallback when the header is missing or malformed', () => {
+    expect(filenameFromDisposition(null, 'fb.bin')).toBe('fb.bin')
+    expect(filenameFromDisposition(undefined, 'fb.bin')).toBe('fb.bin')
+    expect(filenameFromDisposition('', 'fb.bin')).toBe('fb.bin')
+    // malformed percent-encoding in filename* falls through to fallback
+    expect(filenameFromDisposition("filename*=UTF-8''a%0ZZ", 'fb.bin')).toBe('fb.bin')
   })
 })

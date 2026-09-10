@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { api, apiUrl } from '../api'
+import { api } from '../api'
 import { DocumentCard } from './Card'
 import type { Go } from '../App'
+import { useToast } from './Toast'
 import { VIS_LABELS } from '../types'
 import type {
   LocalPreference,
@@ -142,6 +143,7 @@ export function SettingsView({ go }: { go: Go }) {
  * overwritten while open. The previous library is kept as a rollback copy.
  */
 function BackupRestoreCard() {
+  const toast = useToast()
   const [status, setStatus] = useState<RestoreStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -172,6 +174,19 @@ function BackupRestoreCard() {
     }
   }
 
+  // Full-library zip: Blob fetch with preparing/done/failure toasts (TR-02).
+  // Ephemeral (in-memory) builds return 501 here, which surfaces as a clear
+  // failure toast instead of a navigated-away anchor.
+  const downloadBackup = async () => {
+    toast.info('⬇ 正在打包数据备份（含附件）…')
+    try {
+      const name = await api.download('/api/v1/backup', 'supplider-backup.zip')
+      toast.success(`✓ 已下载「${name}」`)
+    } catch (e) {
+      toast.error(`备份下载失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   const cancel = async () => {
     setBusy(true)
     setError('')
@@ -194,9 +209,9 @@ function BackupRestoreCard() {
         <code className="rounded bg-slate-100 px-1">restore.rollback-*</code> 回退副本。
       </p>
       <div className="flex flex-wrap items-center gap-3">
-        <a className="btn-ghost inline-block" href={apiUrl('/api/v1/backup')} download>
+        <button type="button" className="btn-ghost" onClick={() => void downloadBackup()}>
           ⬇ 下载数据备份（.zip）
-        </a>
+        </button>
         <label className="btn-ghost inline-block cursor-pointer">
           ⬆ 上传备份并恢复
           <input
