@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type ListParams } from '../api'
 import type { ExpiringReport, LocalPreference, ShellRiskReport, SupplierSummary } from '../types'
 import { QUAL_LEVELS, STATUS_ARCHIVED, STATUS_BLACKLISTED } from '../types'
 import type { Go } from '../App'
 import { useToast } from './Toast'
+import { Debouncer, normalizeQuery } from '../debounce'
+
+/** Live-search debounce (TR-03): type → search 300ms after the last key. */
+const SEARCH_DEBOUNCE_MS = 300
 
 /** Chinese tag + tailwind classes for one risk severity. */
 function severityTag(sev: string): { label: string; cls: string } {
@@ -40,6 +44,14 @@ function expiryTag(bucket: string): string {
 export function SupplierList({ go }: { go: Go }) {
   const toast = useToast()
   const [params, setParams] = useState<ListParams>({ limit: 20 })
+  // Controlled keyword box (TR-03): the text field updates instantly while
+  // the list query commits 300ms after typing stops (Enter / 🔍 commit at
+  // once, ✕ clears and commits immediately).
+  const [qInput, setQInput] = useState(params.q ?? '')
+  const debouncerRef = useRef<Debouncer | null>(null)
+  if (!debouncerRef.current) debouncerRef.current = new Debouncer(SEARCH_DEBOUNCE_MS)
+  const debouncer = debouncerRef.current
+  useEffect(() => () => debouncer.cancel(), [debouncer])
   const [items, setItems] = useState<SupplierSummary[]>([])
   const [cursor, setCursor] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(false)
@@ -120,6 +132,13 @@ export function SupplierList({ go }: { go: Go }) {
 
   const set = (patch: Partial<ListParams>) => setParams((p) => ({ ...p, ...patch }))
 
+  // Commit the keyword box to the query. Functional equality guard means
+  // Enter / 🔍 on an unchanged (or already-empty) term never refetches.
+  const applyQuery = useCallback((raw: string) => {
+    const q = normalizeQuery(raw)
+    setParams((p) => ((p.q ?? '') === (q ?? '') ? p : { ...p, q }))
+  }, [])
+
   // Export the CURRENT filter view. Fetch as a Blob (instead of a
   // fire-and-forget anchor) so the transfer is tracked: preparing → done
   // with the real filename → failure, all via toast (TR-02). JSON =
@@ -161,14 +180,44 @@ export function SupplierList({ go }: { go: Go }) {
 
       {/* Search + filters */}
       <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-        <input
-          className="input mb-2"
-          placeholder="搜索公司名 / 信用代码 / 法人 / 经营范围 / 品类关键词…"
-          defaultValue={params.q}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') set({ q: (e.target as HTMLInputElement).value.trim() || undefined })
-          }}
-        />
+        <div className="relative mb-2">
+          <input
+            className="input pr-16"
+            placeholder="搜索公司名 / 信用代码 / 法人 / 品类…（输入即搜索）"
+            value={qInput}
+            onChange={(e) => {
+              const v = e.target.value
+              setQInput(v)
+              debouncer.schedule(() => applyQuery(v))
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') debouncer.flush(() => applyQuery(qInput))
+            }}
+          />
+          {qInput !== '' && (
+            <button
+              type="button"
+              aria-label="清除搜索"
+              title="清除"
+              className="absolute right-9 top-1/2 -translate-y-1/2 rounded px-1 leading-none text-slate-400 hover:text-slate-700"
+              onClick={() => {
+                setQInput('')
+                debouncer.flush(() => applyQuery(''))
+              }}
+            >
+              ✕
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="搜索"
+            title="搜索"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 leading-none hover:text-brand-600"
+            onClick={() => debouncer.flush(() => applyQuery(qInput))}
+          >
+            🔍
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <input className="input" placeholder="省（如 浙江）" defaultValue={params.province}
             onKeyDown={(e) => e.key === 'Enter' && set({ province: (e.target as HTMLInputElement).value.trim() || undefined })} />
