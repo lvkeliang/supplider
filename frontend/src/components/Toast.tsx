@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { Icon, type IconName } from './Icon'
 
 /**
  * Global, zero-dependency toast/notification infrastructure (TR-01).
@@ -97,20 +98,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   )
 }
 
-const KIND_STYLE: Record<ToastKind, { bar: string; icon: string; cls: string }> = {
+const KIND_STYLE: Record<ToastKind, { bar: string; icon: IconName; cls: string }> = {
   success: {
     bar: 'bg-emerald-500',
-    icon: '✓',
+    icon: 'check',
     cls: 'border-emerald-200 bg-white text-emerald-800',
   },
   error: {
     bar: 'bg-red-500',
-    icon: '✕',
+    icon: 'x',
     cls: 'border-red-200 bg-white text-red-800',
   },
   info: {
     bar: 'bg-brand-500',
-    icon: 'ℹ',
+    icon: 'info',
     cls: 'border-slate-200 bg-white text-slate-700',
   },
 }
@@ -127,8 +128,8 @@ function ToastBubble({ toast, onClose }: { toast: ToastItem; onClose: () => void
       className={`toast-in pointer-events-auto flex w-full max-w-md items-start gap-2.5 overflow-hidden rounded-lg border py-2.5 pl-0 pr-3 text-sm shadow-lg ${s.cls}`}
       role="status"
     >
-      <span className={`ml-3 mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-xs text-white ${s.bar}`}>
-        {s.icon}
+      <span className={`ml-3 mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-white ${s.bar}`}>
+        <Icon name={s.icon} size={13} strokeWidth={3} />
       </span>
       <span className="flex-1 leading-5">{toast.message}</span>
       <button
@@ -137,7 +138,7 @@ function ToastBubble({ toast, onClose }: { toast: ToastItem; onClose: () => void
         className="shrink-0 text-slate-400 hover:text-slate-600"
         aria-label="关闭"
       >
-        ✕
+        <Icon name="x" size={14} />
       </button>
     </div>
   )

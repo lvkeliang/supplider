@@ -4,6 +4,7 @@ import type { ExpiringReport, LocalPreference, ShellRiskReport, SupplierSummary 
 import { QUAL_LEVELS, STATUS_ARCHIVED, STATUS_BLACKLISTED } from '../types'
 import type { Go } from '../App'
 import { useToast } from './Toast'
+import { Icon } from './Icon'
 import { Debouncer, normalizeQuery } from '../debounce'
 
 /** Live-search debounce (TR-03): type → search 300ms after the last key. */
@@ -45,8 +46,8 @@ export function SupplierList({ go }: { go: Go }) {
   const toast = useToast()
   const [params, setParams] = useState<ListParams>({ limit: 20 })
   // Controlled keyword box (TR-03): the text field updates instantly while
-  // the list query commits 300ms after typing stops (Enter / 🔍 commit at
-  // once, ✕ clears and commits immediately).
+  // the list query commits 300ms after typing stops (Enter or the search
+  // icon commits immediately; the clear icon clears and commits at once).
   const [qInput, setQInput] = useState(params.q ?? '')
   const debouncerRef = useRef<Debouncer | null>(null)
   if (!debouncerRef.current) debouncerRef.current = new Debouncer(SEARCH_DEBOUNCE_MS)
@@ -133,7 +134,7 @@ export function SupplierList({ go }: { go: Go }) {
   const set = (patch: Partial<ListParams>) => setParams((p) => ({ ...p, ...patch }))
 
   // Commit the keyword box to the query. Functional equality guard means
-  // Enter / 🔍 on an unchanged (or already-empty) term never refetches.
+  // Enter or the search icon on an unchanged (or already-empty) term never refetches.
   const applyQuery = useCallback((raw: string) => {
     const q = normalizeQuery(raw)
     setParams((p) => ((p.q ?? '') === (q ?? '') ? p : { ...p, q }))
@@ -146,13 +147,13 @@ export function SupplierList({ go }: { go: Go }) {
   // through the Excel importer.
   const downloadExport = async (format: 'json' | 'xlsx') => {
     const label = format === 'xlsx' ? 'Excel' : 'JSON'
-    toast.info(`⬇ 正在准备${label}导出…`)
+    toast.info(`正在准备${label}导出…`)
     try {
       const name = await api.download(
         api.exportUrl(params, format),
         format === 'xlsx' ? 'suppliers.xlsx' : 'suppliers.json',
       )
-      toast.success(`✓ 已下载「${name}」`)
+      toast.success(`已下载「${name}」`)
     } catch (e) {
       toast.error(`${label}导出失败：${e instanceof Error ? e.message : String(e)}`)
     }
@@ -168,16 +169,16 @@ export function SupplierList({ go }: { go: Go }) {
         <h1 className="text-xl font-semibold text-slate-800">供应商</h1>
         <div className="flex gap-2">
           <button className="btn-ghost" onClick={() => go({ name: 'import' })}>
-            ⬆ Excel 导入
+            <Icon name="upload" size={15} /> Excel 导入
           </button>
           <button className="btn-ghost" onClick={() => downloadExport('xlsx')} title="按当前筛选导出 Excel（可再导入）">
-            ⬇ 导出 Excel
+            <Icon name="download" size={15} /> 导出 Excel
           </button>
           <button className="btn-ghost" onClick={() => downloadExport('json')} title="按当前筛选导出完整 JSON 备份（含变更记录/附件信息）">
-            ⬇ JSON 备份
+            <Icon name="download" size={15} /> JSON 备份
           </button>
           <button className="btn-primary" onClick={() => go({ name: 'new' })}>
-            ＋ 新建供应商
+            <Icon name="plus" size={15} /> 新建供应商
           </button>
         </div>
       </div>
@@ -209,17 +210,17 @@ export function SupplierList({ go }: { go: Go }) {
                 debouncer.flush(() => applyQuery(''))
               }}
             >
-              ✕
+              <Icon name="x" size={14} />
             </button>
           )}
           <button
             type="button"
             aria-label="搜索"
             title="搜索"
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 leading-none hover:text-brand-600"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-slate-500 hover:text-brand-600"
             onClick={() => debouncer.flush(() => applyQuery(qInput))}
           >
-            🔍
+            <Icon name="search" size={16} />
           </button>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -268,7 +269,7 @@ export function SupplierList({ go }: { go: Go }) {
               checked={!!params.watched}
               onChange={(e) => set({ watched: e.target.checked || undefined })}
             />
-            ★ 仅看关注
+            <Icon name="star" size={13} filled className="text-amber-500" /> 仅看关注
           </label>
           {pref?.configured && (
             <label className="flex items-center gap-1" title={`本地供应商（${[pref.province, pref.city].filter(Boolean).join(' · ')}）排最前，仅排序不筛选`}>
@@ -300,7 +301,11 @@ export function SupplierList({ go }: { go: Go }) {
             className="flex w-full items-center gap-2 text-left font-medium"
             onClick={() => setShowReminders((v) => !v)}
           >
-            <span>{reminders.expired > 0 ? '🚫' : '⏰'}</span>
+            <Icon
+              name={reminders.expired > 0 ? 'ban' : 'clock'}
+              size={15}
+              className={reminders.expired > 0 ? 'text-red-600' : 'text-amber-500'}
+            />
             <span>
               {reminders.expired > 0
                 ? `${reminders.expired} 项资质已过期`
@@ -347,7 +352,7 @@ export function SupplierList({ go }: { go: Go }) {
             className="flex w-full items-center gap-2 text-left font-medium"
             onClick={() => setShowShell((v) => !v)}
           >
-            <span>⚠️</span>
+            <Icon name="alert" size={15} className="text-red-600" />
             <span>
               {shellQueue.count} 家供应商存在空壳风险，建议人工审核
               （本地规则自动检测，无需 AI）
@@ -406,52 +411,54 @@ export function SupplierList({ go }: { go: Go }) {
               <span className="font-medium text-slate-800">{s.name}</span>
               {s.watched && (
                 <span
-                  className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
+                  className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
                   title="我关注的供应商：风险/黑名单/归档/资质临期会进铃铛通知"
                 >
-                  ★ 已关注
+                  <Icon name="star" size={11} filled /> 已关注
                 </span>
               )}
               {localOn && isLocal(s) && (
                 <span
-                  className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700"
+                  className="inline-flex items-center gap-0.5 rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700"
                   title="本地供应商（符合本地偏好地域），已优先排序"
                 >
-                  📍 本地
+                  <Icon name="pin" size={11} /> 本地
                 </span>
               )}
               {s.status === STATUS_BLACKLISTED && (
-                <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white" title="黑名单（淘汰/禁用），请勿选用">
-                  🚫 黑名单
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white" title="黑名单（淘汰/禁用），请勿选用">
+                  <Icon name="ban" size={11} /> 黑名单
                 </span>
               )}
               {s.shell_risk && !s.risk_reviewed && (
                 <span
-                  className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700"
+                  className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700"
                   title="本地规则检测到空壳风险，待人工审核（点开详情查看信号/标记已核验）"
                 >
-                  ⚠ 待审核
+                  <Icon name="alert" size={11} /> 待审核
                 </span>
               )}
               {s.shell_risk && s.risk_reviewed && (
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700" title="曾检测到风险，已人工核验/处理">
-                  ✓ 已核验
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700" title="曾检测到风险，已人工核验/处理">
+                  <Icon name="check" size={11} strokeWidth={3} /> 已核验
                 </span>
               )}
               {s.vis_pending && (
                 <span
-                  className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                  className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
                   title="可见性策略收紧：可见范围超出最高允许等级，缓冲期内请调整或申诉，超时将自动降级"
                 >
-                  ⏳ 待调整
+                  <Icon name="clock" size={11} /> 待调整
                 </span>
               )}
               {s.status === STATUS_ARCHIVED && (
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">已归档</span>
               )}
-              <span className="ml-auto text-sm text-amber-500">
-                {s.rating > 0 ? `★ ${s.rating.toFixed(1)}` : ''}
-              </span>
+              {s.rating > 0 && (
+                <span className="ml-auto inline-flex items-center gap-0.5 text-sm text-amber-500">
+                  <Icon name="star" size={13} filled /> {s.rating.toFixed(1)}
+                </span>
+              )}
             </div>
             <div className="mt-1 text-sm text-slate-500">
               {[s.province, s.city, s.district].filter(Boolean).join(' · ')}
@@ -496,7 +503,7 @@ export function SupplierList({ go }: { go: Go }) {
               title={selected.length < 2 ? '请勾选至少 2 家供应商' : '并排对比评分/资质/价格/风险'}
               onClick={() => go({ name: 'compare', ids: selected })}
             >
-              ⚖ 开始对比
+              <Icon name="scales" size={15} /> 开始对比
             </button>
             <button className="text-sm text-slate-400 hover:text-slate-600" onClick={() => setSelected([])}>
               清空

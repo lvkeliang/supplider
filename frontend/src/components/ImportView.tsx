@@ -4,6 +4,7 @@ import type { ImportReport, Inspection } from '../types'
 import { VIS_LABELS, STATUS_BLACKLISTED, STATUS_ARCHIVED } from '../types'
 import type { Go } from '../App'
 import { useToast } from './Toast'
+import { Icon } from './Icon'
 
 /**
  * Excel 批量导入 — manual column mapping (AI smart-mapping is a later,
@@ -59,10 +60,10 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
   // Fetch the template as a Blob (TR-02) so a broken/missing file is shown
   // as a toast instead of a silent or navigated-away anchor download.
   const downloadTemplate = async () => {
-    toast.info('⬇ 正在准备导入模板…')
+    toast.info('正在准备导入模板…')
     try {
       const name = await api.download('/api/v1/import/template', '供应商导入模板.xlsx')
-      toast.success(`✓ 已下载「${name}」`)
+      toast.success(`已下载「${name}」`)
     } catch (e) {
       toast.error(`模板下载失败：${e instanceof Error ? e.message : String(e)}`)
     }
@@ -93,7 +94,7 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
             className="btn-ghost"
             onClick={() => void downloadTemplate()}
           >
-            ⬇ 下载导入模板（.xlsx）
+            <Icon name="download" size={15} /> 下载导入模板（.xlsx）
           </button>
           <label className="btn-primary cursor-pointer">
             选择 Excel 文件
@@ -241,7 +242,11 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
                         {d.matches.slice(0, 2).map((m, j) => (
                           <div key={j}>
                             {m.name}
-                            {m.status === STATUS_BLACKLISTED && <span className="ml-1 text-red-600">🚫 黑名单</span>}
+                            {m.status === STATUS_BLACKLISTED && (
+                              <span className="ml-1 inline-flex items-center gap-0.5 text-red-600">
+                                <Icon name="ban" size={11} /> 黑名单
+                              </span>
+                            )}
                             {m.status === STATUS_ARCHIVED && <span className="ml-1 text-slate-400">已归档</span>}
                           </div>
                         ))}

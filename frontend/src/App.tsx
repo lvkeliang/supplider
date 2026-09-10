@@ -9,6 +9,7 @@ import { SettingsView } from './components/SettingsView'
 import { CompareView } from './components/CompareView'
 import { NotificationBell } from './components/NotificationBell'
 import { Logo } from './components/Logo'
+import { Icon } from './components/Icon'
 
 // Minimal in-app router (no extra dependency): the desktop MVP has a handful
 // of screens. Tauri/web history is not needed for the seed milestone.
@@ -196,10 +197,10 @@ export default function App() {
             {/* 管理设置：可见性策略等管理员配置（个人版单用户即管理员）。 */}
             <button
               onClick={() => go({ name: 'settings' })}
-              className="rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-700"
               title="管理设置（可见性策略）"
             >
-              ⚙ 设置
+              <Icon name="settings" size={16} /> 设置
             </button>
             {features && (
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">

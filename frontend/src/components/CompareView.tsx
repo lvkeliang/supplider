@@ -3,6 +3,7 @@ import { api } from '../api'
 import type { Performance, Supplier } from '../types'
 import { STATUS_BLACKLISTED } from '../types'
 import type { Go } from '../App'
+import { Icon } from './Icon'
 
 // 比价/选型对比：把搜索结果中勾选的多家供应商并排比较（评分、三维均分、
 // 资质、价格区间、风险等），与 srm-cli compare / MCP compare_suppliers
@@ -60,7 +61,14 @@ export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
     { label: '最高资质', render: (d) => d.qualifications?.map((q) => [q.level, q.type].filter(Boolean).join(' ')).join('；') || '—' },
     {
       label: '综合评分',
-      render: (d) => ((d.rating ?? 0) > 0 ? <b className="text-amber-600">★ {(d.rating ?? 0).toFixed(2)}</b> : '—'),
+      render: (d) =>
+        (d.rating ?? 0) > 0 ? (
+          <b className="inline-flex items-center gap-0.5 text-amber-600">
+            <Icon name="star" size={12} filled /> {d.rating!.toFixed(2)}
+          </b>
+        ) : (
+          '—'
+        ),
       best: (d) => d.rating ?? 0,
     },
     { label: '交付均分', render: (d) => fmt(dimAvg(d, (p) => p.delivery ?? 0)) },
@@ -79,12 +87,20 @@ export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
       label: '风险 / 状态',
       render: (d) => (
         <span>
-          {d.status === STATUS_BLACKLISTED && <span className="mr-1 rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">🚫 黑名单</span>}
+          {d.status === STATUS_BLACKLISTED && (
+            <span className="mr-1 inline-flex items-center gap-0.5 rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">
+              <Icon name="ban" size={10} /> 黑名单
+            </span>
+          )}
           {d.risk_flags?.shell_risk && !d.risk_flags?.reviewed && (
-            <span className="mr-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">⚠ 空壳风险</span>
+            <span className="mr-1 inline-flex items-center gap-0.5 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
+              <Icon name="alert" size={10} /> 空壳风险
+            </span>
           )}
           {d.risk_flags?.shell_risk && d.risk_flags?.reviewed && (
-            <span className="mr-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">✓ 已核验</span>
+            <span className="mr-1 inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
+              <Icon name="check" size={10} strokeWidth={3} /> 已核验
+            </span>
           )}
         </span>
       ),

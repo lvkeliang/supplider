@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { Icon } from './Icon'
 
 /**
  * DocumentCard is one collapsible section on the supplier detail page.
@@ -30,9 +31,9 @@ export function DocumentCard({
         >
           <span
             className="text-slate-400 transition-transform duration-200"
-            style={{ transform: open ? 'rotate(90deg)' : 'none' }}
+            style={{ transform: open ? 'rotate(90deg)' : 'none', display: 'inline-flex' }}
           >
-            ▸
+            <Icon name="chevron-right" size={15} />
           </span>
           <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
           {count !== undefined && count > 0 && (

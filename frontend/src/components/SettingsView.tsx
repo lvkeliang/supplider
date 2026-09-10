@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { DocumentCard } from './Card'
+import { Icon } from './Icon'
 import type { Go } from '../App'
 import { useToast } from './Toast'
 import { VIS_LABELS } from '../types'
@@ -178,10 +179,10 @@ function BackupRestoreCard() {
   // Ephemeral (in-memory) builds return 501 here, which surfaces as a clear
   // failure toast instead of a navigated-away anchor.
   const downloadBackup = async () => {
-    toast.info('⬇ 正在打包数据备份（含附件）…')
+    toast.info('正在打包数据备份（含附件）…')
     try {
       const name = await api.download('/api/v1/backup', 'supplider-backup.zip')
-      toast.success(`✓ 已下载「${name}」`)
+      toast.success(`已下载「${name}」`)
     } catch (e) {
       toast.error(`备份下载失败：${e instanceof Error ? e.message : String(e)}`)
     }
@@ -210,10 +211,10 @@ function BackupRestoreCard() {
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-ghost" onClick={() => void downloadBackup()}>
-          ⬇ 下载数据备份（.zip）
+          <Icon name="download" size={15} /> 下载数据备份（.zip）
         </button>
-        <label className="btn-ghost inline-block cursor-pointer">
-          ⬆ 上传备份并恢复
+        <label className="btn-ghost inline-flex cursor-pointer items-center">
+          <Icon name="upload" size={15} /> 上传备份并恢复
           <input
             type="file"
             accept=".zip,application/zip"

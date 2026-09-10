@@ -1,6 +1,6 @@
 /**
  * Tiny framework-agnostic debouncer (TR-03): the list search box fires a
- * query 300ms after the user stops typing, while Enter / the 🔍 button / the
+ * query 300ms after the user stops typing, while Enter / the search button / the
  * ✕ clear button commit immediately. Kept out of React so the timing
  * contract (only the latest scheduled call fires; flush runs at once and
  * cancels the pending one) is unit-testable under fake timers.

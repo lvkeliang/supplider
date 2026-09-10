@@ -4,6 +4,7 @@ import type { BasicInfo, DuplicateMatch, Qualification, ProductService, Performa
 import { QUAL_LEVELS, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import type { Go } from '../App'
 import { useToast } from './Toast'
+import { Icon } from './Icon'
 import {
   PROVINCES,
   canonicalizeCity,
@@ -321,8 +322,9 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
               : 'border-amber-300 bg-amber-50 text-amber-800'
           }`}
         >
-          <div className="font-medium">
-            ⚠ 发现 {dupes.length} 家可能重复的供应商（按信用代码/公司名/名称相近），录入不会被阻断，请核对：
+          <div className="flex items-center gap-1.5 font-medium">
+            <Icon name="alert" size={15} />
+            发现 {dupes.length} 家可能重复的供应商（按信用代码/公司名/名称相近），录入不会被阻断，请核对：
           </div>
           <ul className="mt-1 divide-y divide-current/10">
             {dupes.map((d) => (
@@ -337,7 +339,9 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
                         : '疑似·名称一致'}
                   </span>
                   {d.status === STATUS_BLACKLISTED && (
-                    <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">🚫 黑名单</span>
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">
+                      <Icon name="ban" size={10} /> 黑名单
+                    </span>
                   )}
                   <span className="font-medium">{d.name}</span>
                   <span className="text-xs opacity-75">

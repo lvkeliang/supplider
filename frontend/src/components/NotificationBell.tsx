@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import type { Go } from '../App'
+import { Icon } from './Icon'
 import type { SupplierNotification } from '../types'
 
 // NotificationBell is the in-app 变更通知 center (关注供应商的风险/黑名单/
@@ -71,8 +72,9 @@ export function NotificationBell({ go }: { go: Go }) {
         }}
         className="relative rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-700"
         title="变更通知（关注的供应商）"
+        aria-label="变更通知"
       >
-        🔔
+        <Icon name="bell" size={18} />
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 grid min-w-[18px] place-items-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-[18px] text-white">
             {unread > 99 ? '99+' : unread}
@@ -104,7 +106,9 @@ export function NotificationBell({ go }: { go: Go }) {
                     n.read ? '' : 'bg-blue-50/40'
                   }`}
                 >
-                  <span className="mt-1 shrink-0">{severityIcon(n.severity, n.read)}</span>
+                  <span className={`mt-0.5 inline-flex shrink-0 ${n.read ? 'text-slate-300' : severityColor(n.severity)}`}>
+                    <Icon name={severityIcon(n.severity)} size={15} />
+                  </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-medium text-slate-800">{n.title}</span>
@@ -128,15 +132,25 @@ export function NotificationBell({ go }: { go: Go }) {
   )
 }
 
-function severityIcon(severity: string, read: boolean): string {
-  if (read) return '·'
+function severityIcon(severity: string): 'ban' | 'alert' | 'bell' {
   switch (severity) {
     case 'danger':
-      return '🚫'
+      return 'ban'
     case 'warning':
-      return '⚠️'
+      return 'alert'
     default:
-      return '🔔'
+      return 'bell'
+  }
+}
+
+function severityColor(severity: string): string {
+  switch (severity) {
+    case 'danger':
+      return 'text-red-500'
+    case 'warning':
+      return 'text-amber-500'
+    default:
+      return 'text-brand-500'
   }
 }
 

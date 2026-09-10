@@ -5,6 +5,7 @@ import { STATUS_ARCHIVED, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import { DocumentCard, Field } from './Card'
 import type { Go } from '../App'
 import { useToast } from './Toast'
+import { Icon } from './Icon'
 
 /** Tailwind classes + Chinese label for one risk severity. */
 function sevStyle(sev: string): { cls: string; label: string } {
@@ -296,7 +297,11 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
           </h1>
           <div className="mt-1 text-sm text-slate-500">
             {[b.region.province, b.region.city, b.region.district].filter(Boolean).join(' · ')}
-            {doc.rating ? <span className="ml-3 text-amber-500">★ {doc.rating.toFixed(1)}</span> : null}
+            {doc.rating ? (
+              <span className="ml-3 inline-flex items-center gap-0.5 text-amber-500">
+                <Icon name="star" size={13} filled /> {doc.rating.toFixed(1)}
+              </span>
+            ) : null}
             <span className="ml-3">{VIS_LABELS[doc.visibility] ?? `等级${doc.visibility}`}</span>
           </div>
         </div>
@@ -308,7 +313,10 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
             onClick={toggleWatch}
             title={doc.watched ? '取消关注：该供应商的变更不再进通知' : '关注：风险/黑名单/归档/资质临期等变更会进顶部铃铛通知'}
           >
-            {doc.watched ? '★ 已关注' : '☆ 关注'}
+            <span className="inline-flex items-center gap-1">
+              <Icon name="star" size={15} filled={doc.watched} />
+              {doc.watched ? '已关注' : '关注'}
+            </span>
           </button>
           {archived ? (
             <button className="btn-primary" disabled={busy} onClick={restore}>恢复</button>
@@ -319,8 +327,8 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                 <button className="btn-primary" disabled={busy} onClick={unblacklist}>移出黑名单</button>
               ) : (
                 <>
-                  <button className="btn-ghost" disabled={busy} onClick={openMerge} title="把另一条重复档案并入当前档案（并入绩效/附件/资质等，对方归档），用于清理历史重复录入">🔀 合并重复</button>
-                  <button className="btn-ghost" disabled={busy} onClick={blacklist} title="列入黑名单（淘汰/禁用）：仍可搜到但醒目标记">🚫 列入黑名单</button>
+                  <button className="btn-ghost" disabled={busy} onClick={openMerge} title="把另一条重复档案并入当前档案（并入绩效/附件/资质等，对方归档），用于清理历史重复录入"><Icon name="shuffle" size={15} /> 合并重复</button>
+                  <button className="btn-ghost" disabled={busy} onClick={blacklist} title="列入黑名单（淘汰/禁用）：仍可搜到但醒目标记"><Icon name="ban" size={15} /> 列入黑名单</button>
                   <button className="btn-danger" disabled={busy} onClick={archive}>归档</button>
                 </>
               )}
@@ -379,7 +387,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                               : '疑似·同名'}
                         </span>
                         {m.status === STATUS_BLACKLISTED && (
-                          <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">🚫 黑名单</span>
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-red-600 px-2 py-0.5 text-xs text-white"><Icon name="ban" size={11} /> 黑名单</span>
                         )}
                         {m.status === STATUS_ARCHIVED && (
                           <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600">已归档</span>
@@ -434,8 +442,8 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
 
       {/* 黑名单横幅（淘汰/禁用） */}
       {blacklisted && (
-        <div className="rounded-lg border border-red-600 bg-red-600 px-4 py-2 text-sm font-medium text-white">
-          🚫 该供应商已列入黑名单（淘汰/禁用），请勿选用。
+        <div className="flex items-center gap-2 rounded-lg border border-red-600 bg-red-600 px-4 py-2 text-sm font-medium text-white">
+          <Icon name="ban" size={16} /> 该供应商已列入黑名单（淘汰/禁用），请勿选用。
           {doc.blacklist_reason ? <span className="ml-1 font-normal">原因：{doc.blacklist_reason}</span> : null}
         </div>
       )}
@@ -472,8 +480,8 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
       )}
       {/* 申诉成立：管理员批准的例外，可保留超出上限的可见等级 */}
       {doc.vis_exception && !doc.vis_enforcement?.pending_adjustment && (
-        <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
-          ✓ 申诉成立：该供应商的可见范围已获管理员例外批准。再次修改可见范围后需重新申请。
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
+          <Icon name="check" size={15} strokeWidth={3} /> 申诉成立：该供应商的可见范围已获管理员例外批准。再次修改可见范围后需重新申请。
         </div>
       )}
 
@@ -493,9 +501,13 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
             title={
               flagged ? (
                 reviewed ? (
-                  <span className="text-emerald-700">✓ 风险已审核{shell ? '（空壳信号）' : ''}</span>
+                  <span className="inline-flex items-center gap-1 text-emerald-700">
+                    <Icon name="check" size={14} strokeWidth={3} /> 风险已审核{shell ? '（空壳信号）' : ''}
+                  </span>
                 ) : (
-                  <span className="text-red-700">⚠ 风险检测 · 待人工审核{shell ? '（空壳风险）' : ''}</span>
+                  <span className="inline-flex items-center gap-1 text-red-700">
+                    <Icon name="alert" size={14} /> 风险检测 · 待人工审核{shell ? '（空壳风险）' : ''}
+                  </span>
                 )
               ) : (
                 '资料补全建议'
@@ -529,7 +541,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
             {flagged && !reviewed && !archived && (
               <div className="mt-3 flex gap-2 border-t border-slate-100 pt-3">
                 <button className="btn-primary" disabled={reviewing} onClick={() => reviewRisk('verified')}>
-                  {reviewing ? '处理中…' : '✓ 已核验（查验原件，正规）'}
+                  {reviewing ? '处理中…' : <span className="inline-flex items-center gap-1"><Icon name="check" size={15} strokeWidth={3} /> 已核验（查验原件，正规）</span>}
                 </button>
                 <button className="btn-ghost" disabled={reviewing} onClick={() => reviewRisk('dismissed')}>
                   误报忽略
@@ -564,7 +576,11 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
               <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border border-slate-100 px-3 py-2 text-sm">
                 <span className="font-medium">{q.type}</span>
                 {q.level && <span className="chip">{q.level}</span>}
-                {q.verified && <span className="text-xs text-emerald-600">✓ 已核验</span>}
+                {q.verified && (
+                  <span className="inline-flex items-center gap-0.5 text-xs text-emerald-600">
+                    <Icon name="check" size={12} strokeWidth={3} /> 已核验
+                  </span>
+                )}
                 <span className="ml-auto text-xs text-slate-400">
                   {[q.cert_no, q.issuer, q.expiry ? `到期 ${q.expiry}` : ''].filter(Boolean).join(' · ')}
                 </span>
@@ -606,7 +622,11 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
               <div key={i} className="rounded-md border border-slate-100 px-3 py-2 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{p.project}</span>
-                  {p.score ? <span className="text-amber-500">★ {p.score}</span> : null}
+                  {p.score ? (
+                    <span className="inline-flex items-center gap-0.5 text-amber-500">
+                      <Icon name="star" size={13} filled /> {p.score}
+                    </span>
+                  ) : null}
                   <span className="ml-auto text-xs text-slate-400">{p.date}</span>
                 </div>
                 {(p.delivery || p.quality || p.cooperation) && (
