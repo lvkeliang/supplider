@@ -30,6 +30,19 @@ interface CustomRow {
   value: string
 }
 
+/** Long-form anchor navigation (TR-13): every form section in display order. */
+const FORM_SECTIONS = [
+  { id: 'basic', label: '基本信息' },
+  { id: 'contact', label: '联系方式' },
+  { id: 'region', label: '地域' },
+  { id: 'categories', label: '品类' },
+  { id: 'qualifications', label: '资质' },
+  { id: 'products', label: '产品/服务' },
+  { id: 'performance', label: '合作/绩效' },
+  { id: 'custom', label: '自定义字段' },
+  { id: 'visibility', label: '可见性' },
+] as const
+
 interface FormState {
   owner: string
   basic: BasicInfo
@@ -231,22 +244,70 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
     }
   }
 
+  // TR-13: highlight the section currently under the sticky bars and jump
+  // to one on chip click.
+  const [activeSection, setActiveSection] = useState<string>(FORM_SECTIONS[0].id)
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // The topmost section intersecting the band just under the two
+        // sticky bars is the active one.
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        if (visible[0]) setActiveSection(visible[0].target.id.replace(/^form-sec-/, ''))
+      },
+      // Trigger once the section top passes ~150px (header + title + chips).
+      { rootMargin: '-150px 0px -70% 0px', threshold: 0 },
+    )
+    FORM_SECTIONS.forEach((s) => {
+      const el = document.getElementById(`form-sec-${s.id}`)
+      if (el) observer.observe(el)
+    })
+    return () => observer.disconnect()
+  }, [loading])
+
+  const jumpToSection = (id: string) => {
+    document
+      .getElementById(`form-sec-${id}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   const cancel = () => go(editing && id ? { name: 'detail', id } : { name: 'list' })
 
   if (loading) return <div className="py-10 text-center text-slate-400">加载中…</div>
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      {/* Sticky title bar with cancel/save reachable while the long form
-          scrolls (TR-11). */}
-      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 flex items-center justify-between bg-slate-50 px-4 py-2">
-        <h1 className="text-xl font-semibold text-slate-800">{editing ? '编辑供应商' : '新建供应商'}</h1>
-        <div className="flex gap-2">
-          <button className="btn-ghost" onClick={cancel}>取消</button>
-          <button className="btn-primary" disabled={saving} onClick={submit}>
-            {saving ? '保存中…' : editing ? '保存修改' : '创建供应商'}
-          </button>
+      {/* Sticky title bar with cancel/save + section anchor chips
+          reachable while the long form scrolls (TR-11/TR-13). */}
+      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 bg-slate-50 px-4 py-2">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-slate-800">{editing ? '编辑供应商' : '新建供应商'}</h1>
+          <div className="flex gap-2">
+            <button className="btn-ghost" onClick={cancel}>取消</button>
+            <button className="btn-primary" disabled={saving} onClick={submit}>
+              {saving ? '保存中…' : editing ? '保存修改' : '创建供应商'}
+            </button>
+          </div>
         </div>
+        <nav className="mt-2 flex gap-1.5 overflow-x-auto pb-0.5" aria-label="表单分区">
+          {FORM_SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => jumpToSection(s.id)}
+              className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs transition-colors ${
+                activeSection === s.id
+                  ? 'bg-brand-600 text-white'
+                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </nav>
       </div>
 
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -291,7 +352,7 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       )}
 
       {/* 基本信息 */}
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-basic" className="form-section space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700">基本信息</h2>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
@@ -382,7 +443,7 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
 
       {/* 联系方式 — 联系人/电话是合作前尽调与日常联系的核心字段，也用于
           空壳检测 R202（缺联系人/电话会被标记）。 */}
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-contact" className="form-section space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700">联系方式</h2>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -414,7 +475,7 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       </section>
 
       {/* 地域（省/市/区县级联，避免错字破坏本地优先排序；支持整段粘贴拆分） */}
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-region" className="form-section space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700">地域 *（本地供应商偏好）</h2>
         <input
           className="input"
@@ -487,14 +548,14 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       </section>
 
       {/* 品类 */}
-      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-categories" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700">品类标签</h2>
         <input className="input" placeholder="多个品类用逗号分隔，如 施工服务, 市政工程"
           value={form.categoriesText} onChange={(e) => setForm((f) => ({ ...f, categoriesText: e.target.value }))} />
       </section>
 
       {/* 资质 */}
-      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-qualifications" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-700">资质证书</h2>
           <button className="btn-ghost !py-1 text-xs"
@@ -520,7 +581,7 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       </section>
 
       {/* 产品/服务 */}
-      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-products" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-700">产品 / 服务</h2>
           <button className="btn-ghost !py-1 text-xs"
@@ -541,7 +602,7 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       </section>
 
       {/* 绩效 */}
-      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-performance" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-700">合作 / 绩效记录</h2>
           <button className="btn-ghost !py-1 text-xs"
@@ -582,7 +643,7 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       </section>
 
       {/* 自定义字段 — 自由扩展,不预定义 */}
-      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-custom" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-slate-700">自定义字段</h2>
@@ -621,7 +682,7 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
       </section>
 
       {/* 可见性 */}
-      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-visibility" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700">可见性</h2>
         <select className="input max-w-xs" value={form.visibility}
           onChange={(e) => setForm((f) => ({ ...f, visibility: Number(e.target.value) }))}>

@@ -46,3 +46,9 @@
 .toast-in {
   animation: toast-in 0.18s ease-out;
 }
+
+/* TR-13: form-section anchor jumps land below the global header (57px) and
+   the form's sticky title+chip band. */
+.form-section {
+  scroll-margin-top: 150px;
+}
