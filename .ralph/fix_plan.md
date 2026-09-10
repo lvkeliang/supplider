@@ -70,7 +70,7 @@
 ### P2 — 后续打磨
 
 - [x] **缺陷修复：`compact()` 把数字 0 当未设置，`min_rating=0`/`max_rating=0` 被丢弃**：前端序列化保留 0；后端新增 `SupplierFilter.MaxRatingSet` 存在性标志，显式 `max_rating=0` = 仅无评分（与缺省返回全部区分）；min=0 自然匹配全部。httpapi 测试钉死。——2026-09-10
-- [ ] **TR-15 品牌色板补全**：`tailwind.config.js` 中 brand 色仅 50/100/500/600/700 五阶，缺 200/300/400/800/900 中间色阶
+- [x] **TR-15 品牌色板补全**：`tailwind.config.js` 中 brand 色仅 50/100/500/600/700 五阶，缺 200/300/400/800/900 中间色阶——2026-09-10
 - [ ] **TR-16 Emoji 替换为 SVG 图标**：用 Heroicons 或 Lucide 替换 ⚠ 🚫 ✓ ⚖ 🔔 ⏰ 📍 等状态 emoji，保证跨平台一致性
 - [ ] **TR-17 暗色模式支持**：利用 Tailwind `dark:` 前缀添加暗色模式，跟随系统或手动切换
 - [ ] **TR-18 键盘快捷键**：添加 Ctrl+N（新建）、/或 Ctrl+K（搜索）、Esc（返回）等快捷键，设置中提供说明
