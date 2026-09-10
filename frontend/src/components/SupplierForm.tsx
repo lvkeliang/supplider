@@ -12,6 +12,13 @@ import {
   districtsOf,
   splitRegion,
 } from '../regions'
+import {
+  OTHER_TYPE,
+  SUPPLIER_TYPES,
+  composeSupplierType,
+  splitSupplierType,
+  type SupplierTypeChoice,
+} from '../supplierType'
 
 // 文档式录入:固定核心字段 + 可自由增删的自定义字段(不预定义字段名/类型)。
 // 资质/产品/绩效也是可增删的行,贴合施工商记资质设备、贸易商记品牌规格的差异。
@@ -31,6 +38,8 @@ interface FormState {
   perfs: Performance[]
   custom: CustomRow[]
   visibility: number
+  /** Supplier-type select state (basic.supplier_type is composed from it). */
+  typeChoice: SupplierTypeChoice
 }
 
 function emptyForm(visibilityLevels: number): FormState {
@@ -46,6 +55,7 @@ function emptyForm(visibilityLevels: number): FormState {
     perfs: [],
     custom: [],
     visibility: Math.min(0, visibilityLevels - 1),
+    typeChoice: { category: '', custom: '' },
   }
 }
 
@@ -76,6 +86,7 @@ function fromSupplier(s: Supplier): FormState {
     perfs: (s.performance_history ?? []).map((p) => ({ ...p })),
     custom,
     visibility: s.visibility ?? 0,
+    typeChoice: splitSupplierType(s.basic_info.supplier_type),
   }
 }
 
@@ -166,9 +177,15 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
     if (!form.basic.region.province.trim() || !form.basic.region.city.trim())
       return setError('地域的省、市必填（本地化偏好依赖）')
 
+    if (form.typeChoice.category === OTHER_TYPE && !form.typeChoice.custom.trim())
+      return setError('选择「其他」类型时请填写具体类型')
+
     const categories = form.categoriesText.split(/[,，、\s]+/).map((s) => s.trim()).filter(Boolean)
     const body = {
-      basic_info: form.basic,
+      basic_info: {
+        ...form.basic,
+        supplier_type: composeSupplierType(form.typeChoice) || undefined,
+      },
       categories,
       qualifications: form.quals.filter((q) => q.type.trim()),
       products_services: form.products.filter((p) => p.name.trim()),
@@ -280,17 +297,33 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
           </div>
           <div>
             <label className="label">供应商类型</label>
-            <input className="input" list="supplier-types" placeholder="施工商/贸易商/服务商…"
-              value={form.basic.supplier_type ?? ''}
-              onChange={(e) => setBasic({ supplier_type: e.target.value })} />
-            <datalist id="supplier-types">
-              <option value="施工商" />
-              <option value="建筑施工" />
-              <option value="贸易商" />
-              <option value="服务商" />
-              <option value="设备租赁商" />
-              <option value="生产商" />
-            </datalist>
+            <select
+              className="input"
+              value={form.typeChoice.category}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  typeChoice: { category: e.target.value, custom: e.target.value === OTHER_TYPE ? f.typeChoice.custom : '' },
+                }))
+              }
+            >
+              <option value="">请选择（可选）</option>
+              {SUPPLIER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              <option value={OTHER_TYPE}>{OTHER_TYPE}（自定义）</option>
+            </select>
+            {form.typeChoice.category === OTHER_TYPE && (
+              <input
+                className="input mt-1"
+                placeholder="填写具体类型，如 园林绿化专业分包"
+                value={form.typeChoice.custom}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    typeChoice: { ...f.typeChoice, custom: e.target.value },
+                  }))
+                }
+              />
+            )}
           </div>
           <div className="col-span-2">
             <label className="label">经营范围</label>
