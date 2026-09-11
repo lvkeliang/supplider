@@ -88,8 +88,8 @@ type SupplierFilter struct {
 	// an explicit max_rating=0 ("unrated only") distinguishable from no
 	// bound, since 0 is the float zero value. MinRating=0 needs no predicate
 	// (every rating is >= 0), so it needs no presence flag.
-	MinRating   float64
-	MaxRating   float64
+	MinRating    float64
+	MaxRating    float64
 	MaxRatingSet bool
 
 	// OwnerID restricts to suppliers owned by this user.

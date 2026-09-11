@@ -176,7 +176,7 @@ func matchesFilter(d *domain.Supplier, f datamodel.SupplierFilter) bool {
 	if f.MinRating > 0 && d.Rating < f.MinRating {
 		return false
 	}
-	if f.MaxRatingSet && d.Rating > f.MaxRating {
+	if (f.MaxRatingSet || f.MaxRating > 0) && d.Rating > f.MaxRating {
 		return false
 	}
 	if f.OwnerID != "" && d.Owner != f.OwnerID {

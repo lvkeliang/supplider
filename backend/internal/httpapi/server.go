@@ -758,13 +758,13 @@ func filterFromQuery(q url.Values) (datamodel.SupplierFilter, error) {
 	maxRating, _ := strconv.ParseFloat(q.Get("max_rating"), 64)
 
 	return datamodel.SupplierFilter{
-		Province:        q.Get("province"),
-		City:            q.Get("city"),
-		District:        q.Get("district"),
-		Categories:      nonEmpty(strings.Split(q.Get("category"), ",")),
-		MinQualRank:     minQual,
-		MinRating:       minRating,
-		MaxRating:       maxRating,
+		Province:    q.Get("province"),
+		City:        q.Get("city"),
+		District:    q.Get("district"),
+		Categories:  nonEmpty(strings.Split(q.Get("category"), ",")),
+		MinQualRank: minQual,
+		MinRating:   minRating,
+		MaxRating:   maxRating,
 		// Presence (not value): an explicit max_rating=0 means
 		// "unrated only", distinct from the parameter being absent.
 		MaxRatingSet:    q.Has("max_rating"),
