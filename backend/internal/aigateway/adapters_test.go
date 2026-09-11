@@ -167,3 +167,75 @@ func TestConfigRoundTripAndRedaction(t *testing.T) {
 		t.Errorf("DecodeConfig(\"\") = %+v, %v", d, err)
 	}
 }
+
+// Vision (TR-19-B): an image turn must be rendered into each provider's
+// multimodal content shape — OpenAI image_url data-URI parts, Anthropic
+// base64 source blocks.
+
+func TestOpenAIAdapterImageContent(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		captured = req
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"{\"company_name\":\"A\"}"}}]}`))
+	}))
+	defer srv.Close()
+
+	a := NewOpenAIAdapter(Config{BaseURL: srv.URL, APIKey: "k", Model: "m"}, nil)
+	if _, err := a.Complete(context.Background(), ChatRequest{
+		Messages: []ChatMessage{{Role: "user", Content: "提取", ImageBase64: "aGVsbG8=", ImageMIME: "image/jpeg"}},
+	}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	msg := captured["messages"].([]any)[0].(map[string]any)
+	parts := msg["content"].([]any)
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 content parts, got %d", len(parts))
+	}
+	img := parts[1].(map[string]any)
+	if img["type"] != "image_url" {
+		t.Errorf("part type = %v", img["type"])
+	}
+	url := img["image_url"].(map[string]any)["url"].(string)
+	if url != "data:image/jpeg;base64,aGVsbG8=" {
+		t.Errorf("image url = %q", url)
+	}
+}
+
+func TestAnthropicAdapterImageContent(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		captured = req
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"content":[{"type":"text","text":"{}"}]}`))
+	}))
+	defer srv.Close()
+
+	a := NewAnthropicAdapter(Config{BaseURL: srv.URL, APIKey: "k", Model: "m"}, nil)
+	if _, err := a.Complete(context.Background(), ChatRequest{
+		Messages: []ChatMessage{{Role: "user", Content: "提取", ImageBase64: "aGVsbG8="}},
+	}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	turn := captured["messages"].([]any)[0].(map[string]any)
+	blocks := turn["content"].([]any)
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(blocks))
+	}
+	img := blocks[1].(map[string]any)
+	if img["type"] != "image" {
+		t.Errorf("block type = %v", img["type"])
+	}
+	src := img["source"].(map[string]any)
+	if src["type"] != "base64" || src["media_type"] != "image/png" || src["data"] != "aGVsbG8=" {
+		t.Errorf("source = %v", src)
+	}
+}

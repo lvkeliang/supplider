@@ -144,6 +144,15 @@ func (s *Server) setGateway(gw *aigateway.Service) {
 	s.aiMu.Unlock()
 }
 
+// liveGateway returns the current AI gateway (nil = disabled), taking the
+// read lock. AI feature handlers call this instead of reading s.gateway
+// directly so a PUT /ai/config hot-swap can never race a completion.
+func (s *Server) liveGateway() *aigateway.Service {
+	s.aiMu.RLock()
+	defer s.aiMu.RUnlock()
+	return s.gateway
+}
+
 // WithObjects attaches the object store used for supplier attachments and
 // returns the server for chaining. Pass nil to leave attachments disabled.
 func (s *Server) WithObjects(store objectstore.Store) *Server {
@@ -174,6 +183,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("PUT /api/v1/ai/config", s.handleSaveAIConfig)
 	s.Mux.HandleFunc("POST /api/v1/ai/config", s.handleSaveAIConfig)
 	s.Mux.HandleFunc("GET /api/v1/ai/test", s.handleTestAIConfig)
+	s.Mux.HandleFunc("POST /api/v1/ai/ocr", s.handleOCR)
 	s.Mux.HandleFunc("POST /api/v1/suppliers", s.handleCreate)
 	s.Mux.HandleFunc("GET /api/v1/suppliers", s.handleList)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/duplicates", s.handleDuplicates)

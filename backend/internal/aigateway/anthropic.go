@@ -52,8 +52,15 @@ func NewAnthropicAdapter(cfg Config, client *http.Client) *AnthropicAdapter {
 }
 
 type anthropicContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type   string                `json:"type"`
+	Text   string                `json:"text,omitempty"`
+	Source *anthropicImageSource `json:"source,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"` // "base64"
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 type anthropicRequest struct {
@@ -90,13 +97,21 @@ func (a *AnthropicAdapter) Complete(ctx context.Context, req ChatRequest) (ChatR
 			system = strings.TrimSpace(system + "\n" + m.Content)
 			continue
 		}
-		turns = append(turns, anthropicContentUser{
-			Role: m.Role,
-			Content: []anthropicContentBlock{{
-				Type: "text",
-				Text: m.Content,
-			}},
-		})
+		blocks := make([]anthropicContentBlock, 0, 2)
+		if m.Content != "" {
+			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: m.Content})
+		}
+		if m.ImageBase64 != "" {
+			blocks = append(blocks, anthropicContentBlock{
+				Type: "image",
+				Source: &anthropicImageSource{
+					Type:      "base64",
+					MediaType: imageMIME(m.ImageMIME),
+					Data:      m.ImageBase64,
+				},
+			})
+		}
+		turns = append(turns, anthropicContentUser{Role: m.Role, Content: blocks})
 	}
 
 	body := anthropicRequest{

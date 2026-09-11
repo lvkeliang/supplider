@@ -40,9 +40,20 @@ func NewOpenAIAdapter(cfg Config, client *http.Client) *OpenAIAdapter {
 
 // openaiChatMessage is one message in the OpenAI body. system goes into the
 // messages array as the first turn (unlike Anthropic's top-level field).
+// Content is either a string (text-only) or []openaiContentPart (vision).
 type openaiChatMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+type openaiContentPart struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	ImageURL *openaiImageURL `json:"image_url,omitempty"`
+}
+
+type openaiImageURL struct {
+	URL string `json:"url"`
 }
 
 type openaiChatRequest struct {
@@ -74,7 +85,14 @@ type openaiChatResponse struct {
 func (a *OpenAIAdapter) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	msgs := make([]openaiChatMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
-		msgs = append(msgs, openaiChatMessage{Role: m.Role, Content: m.Content})
+		om := openaiChatMessage{Role: m.Role, Content: m.Content}
+		if m.ImageBase64 != "" {
+			om.Content = []openaiContentPart{
+				{Type: "text", Text: m.Content},
+				{Type: "image_url", ImageURL: &openaiImageURL{URL: imageDataURI(m.ImageMIME, m.ImageBase64)}},
+			}
+		}
+		msgs = append(msgs, om)
 	}
 	body := openaiChatRequest{
 		Model:       a.model,
