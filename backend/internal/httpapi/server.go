@@ -55,8 +55,10 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/supplider/supplider/backend/internal/aigateway"
 	"github.com/supplider/supplider/backend/internal/backup"
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
@@ -71,6 +73,12 @@ import (
 type Server struct {
 	Service  *supplier.Service
 	Features featureflag.Features
+	// gateway is the live AI provider (nil = disabled). It is swapped on
+	// PUT /ai/config; guarded by aiMu. aiClient is shared by every rebuilt
+	// gateway so pooled connections survive a config change.
+	aiMu     sync.RWMutex
+	gateway  *aigateway.Service
+	aiClient *http.Client
 	// Objects is the attachment store; nil disables attachment upload/
 	// download (handlers answer 501). Wired via WithObjects.
 	Objects objectstore.Store
@@ -97,9 +105,43 @@ type RestoreFuncs struct {
 
 // New wires routes and returns the server.
 func New(svc *supplier.Service, feats featureflag.Features) *Server {
-	s := &Server{Service: svc, Features: feats, Mux: http.NewServeMux()}
+	s := &Server{Service: svc, Features: feats, Mux: http.NewServeMux(), aiClient: &http.Client{Timeout: 120 * time.Second}}
 	s.routes()
 	return s
+}
+
+// WithGateway attaches the live AI gateway (nil leaves AI disabled) and
+// returns the server for chaining. handleFeatures derives the AI flags from
+// this gateway's Enabled() at request time, so saving a provider config
+// lights the AI entry points without a restart.
+func (s *Server) WithGateway(gw *aigateway.Service) *Server {
+	s.aiMu.Lock()
+	s.gateway = gw
+	s.aiMu.Unlock()
+	return s
+}
+
+// aiEnabled reports whether a provider is configured (drives /features).
+func (s *Server) aiEnabled() bool {
+	s.aiMu.RLock()
+	defer s.aiMu.RUnlock()
+	return s.gateway != nil && s.gateway.Enabled()
+}
+
+func (s *Server) currentAIConfig() aigateway.Config {
+	s.aiMu.RLock()
+	gw := s.gateway
+	s.aiMu.RUnlock()
+	if gw == nil {
+		return aigateway.Config{}
+	}
+	return gw.Config()
+}
+
+func (s *Server) setGateway(gw *aigateway.Service) {
+	s.aiMu.Lock()
+	s.gateway = gw
+	s.aiMu.Unlock()
 }
 
 // WithObjects attaches the object store used for supplier attachments and
@@ -128,6 +170,10 @@ func (s *Server) WithRestore(fns *RestoreFuncs) *Server {
 func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /readyz", s.handleReady)
 	s.Mux.HandleFunc("GET /api/v1/features", s.handleFeatures)
+	s.Mux.HandleFunc("GET /api/v1/ai/config", s.handleGetAIConfig)
+	s.Mux.HandleFunc("PUT /api/v1/ai/config", s.handleSaveAIConfig)
+	s.Mux.HandleFunc("POST /api/v1/ai/config", s.handleSaveAIConfig)
+	s.Mux.HandleFunc("GET /api/v1/ai/test", s.handleTestAIConfig)
 	s.Mux.HandleFunc("POST /api/v1/suppliers", s.handleCreate)
 	s.Mux.HandleFunc("GET /api/v1/suppliers", s.handleList)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/duplicates", s.handleDuplicates)
@@ -176,7 +222,9 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFeatures(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.Features)
+	// AI flags are derived from the live gateway (not the startup snapshot)
+	// so saving a provider config lights the AI entry points immediately.
+	writeJSON(w, http.StatusOK, s.Features.WithAIState(s.aiEnabled()))
 }
 
 // ---------- suppliers ----------

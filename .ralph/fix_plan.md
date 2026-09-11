@@ -77,7 +77,7 @@
 
 ### AI — 个人版 AI 模型接入（独立长线）
 
-- [~] **TR-19-A AI Gateway 双 Provider 适配器**：实现 `OpenAIAdapter`（覆盖 DeepSeek/通义/GLM/Moonshot/Ollama）+ `AnthropicAdapter`（Claude/DeepSeek Anthropic 端点）；配置存储（SQLite settings 表）；`POST /api/v1/ai/config` + `GET /api/v1/ai/test` 端点；启动时探测 provider → `WithAIState(true/false)`；设置页 AI 配置卡片（预设提供商快捷填充 + 测试连接）。自建双 Adapter 仅用 `net/http`（零依赖、与现有 Gateway 接口无缝衔接）。**阶段 1，2-3 天**——后端 adapter+Gateway 已落地 2026-09-10，待 HTTP 端点/启动探测/设置页接线
+- [~] **TR-19-A AI Gateway 双 Provider 适配器**：实现 `OpenAIAdapter`（覆盖 DeepSeek/通义/GLM/Moonshot/Ollama）+ `AnthropicAdapter`（Claude/DeepSeek Anthropic 端点）；配置存储（SQLite settings 表）；`POST /api/v1/ai/config` + `GET /api/v1/ai/test` 端点；启动时探测 provider → `WithAIState(true/false)`；设置页 AI 配置卡片（预设提供商快捷填充 + 测试连接）。自建双 Adapter 仅用 `net/http`（零依赖、与现有 Gateway 接口无缝衔接）。**阶段 1，2-3 天**——adapter+Gateway（2026-09-10）、HTTP 端点+启动接线+动态 features（2026-09-10）已落地，仅剩设置页 AI 卡片（前端）
 - [ ] **TR-19-B OCR 辅助录入**：前端"图片录入"按钮；后端 `POST /api/v1/ai/ocr` 上传图片 → 调用 `Gateway.Complete()` 带视觉提示词 → 解析 JSON 结果预填表单。**阶段 2，2-3 天**
 - [ ] **TR-19-C Excel 智能列映射**：`ImportView.tsx` 预览阶段增加"AI 建议映射"按钮；后端 `POST /api/v1/ai/excel-map` 发送表头+示例值 → AI 返回映射建议 JSON。**阶段 3，1-2 天**
 - [ ] **TR-19-D 自然语言搜索**：搜索框旁增加"AI 搜索"模式切换；后端 `POST /api/v1/ai/nl-search` 转自然语言为结构化筛选参数。**阶段 4，2-3 天**

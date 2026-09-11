@@ -18,7 +18,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/supplider/supplider/backend/internal/aigateway"
 	"github.com/supplider/supplider/backend/internal/backup"
+	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/featureflag"
 	"github.com/supplider/supplider/backend/internal/httpapi"
 	"github.com/supplider/supplider/backend/internal/objectfactory"
@@ -72,13 +74,23 @@ func main() {
 
 	svc := supplier.NewService(store)
 
-	// Feature matrix: AI flags stay off until a gateway provider is
-	// configured (MVP ships without AI keys — all AI entries hidden).
-	feats := featureflag.Default().WithAIState(false)
+	// AI provider config: read the persisted selection and build the live
+	// gateway. No key → disabled (all AI entries hidden). The /features
+	// endpoint derives AI flags from this gateway at request time, so saving
+	// a config lights the entry points without a restart.
+	rawAI, err := store.GetSetting(context.Background(), aigateway.SettingKey)
+	if err != nil && !errors.Is(err, datamodel.ErrNotFound) {
+		log.Printf("load ai config: %v (AI disabled)", err)
+	}
+	aiCfg, _ := aigateway.DecodeConfig(rawAI)
+	gateway := aigateway.New(aiCfg, nil)
+
+	feats := featureflag.Default().WithAIState(gateway.Enabled())
 
 	// Single binary serves API + embedded UI. CORS lets the Tauri webview
 	// (tauri://localhost / tauri.localhost) call the loopback sidecar.
 	apiServer := httpapi.New(svc, feats).
+		WithGateway(gateway).
 		WithObjects(objects).
 		WithBackup(backupWriter(store, objects)).
 		WithRestore(restoreFuncs(*dataDir)).
