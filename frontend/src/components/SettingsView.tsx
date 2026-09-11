@@ -133,7 +133,32 @@ export function SettingsView({ go }: { go: Go }) {
       <LocalPreferenceCard />
 
       <BackupRestoreCard />
+
+      <ShortcutsCard />
     </div>
+  )
+}
+
+/** Keyboard shortcut reference (TR-18). */
+function ShortcutsCard() {
+  const rows: Array<[string, string]> = [
+    ['Ctrl/⌘ + N', '新建供应商'],
+    ['/ 或 Ctrl/⌘ + K', '聚焦供应商搜索框'],
+    ['Esc', '从详情/表单等页面返回列表'],
+  ]
+  return (
+    <DocumentCard title="键盘快捷键">
+      <ul className="space-y-1.5 text-sm">
+        {rows.map(([keys, desc]) => (
+          <li key={keys} className="flex items-center gap-3">
+            <kbd className="min-w-[9.5rem] rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs text-slate-700">
+              {keys}
+            </kbd>
+            <span className="text-slate-600">{desc}</span>
+          </li>
+        ))}
+      </ul>
+    </DocumentCard>
   )
 }
 

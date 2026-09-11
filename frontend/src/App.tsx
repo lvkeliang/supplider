@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, setNetworkEventListener, type NetworkEvent } from './api'
+import { FOCUS_SEARCH_EVENT, hotkeyAction } from './hotkeys'
 import type { Features } from './types'
 import { SupplierList } from './components/SupplierList'
 import { SupplierForm } from './components/SupplierForm'
@@ -141,6 +142,28 @@ export default function App() {
   }, [connection])
 
   const go = (v: View) => setView(v)
+
+  // Global shortcuts (TR-18). Esc returns to the list only from another view.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      switch (hotkeyAction(e, e.target)) {
+        case 'new':
+          e.preventDefault()
+          go({ name: 'new' })
+          break
+        case 'search':
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent(FOCUS_SEARCH_EVENT))
+          break
+        case 'back':
+          if (view.name !== 'list') go({ name: 'list' })
+          break
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.name])
 
   if (connection === 'connecting') {
     return (

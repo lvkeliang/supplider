@@ -6,6 +6,7 @@ import type { Go } from '../App'
 import { useToast } from './Toast'
 import { Icon } from './Icon'
 import { Debouncer, normalizeQuery } from '../debounce'
+import { FOCUS_SEARCH_EVENT } from '../hotkeys'
 
 /** Live-search debounce (TR-03): type → search 300ms after the last key. */
 const SEARCH_DEBOUNCE_MS = 300
@@ -53,6 +54,13 @@ export function SupplierList({ go }: { go: Go }) {
   if (!debouncerRef.current) debouncerRef.current = new Debouncer(SEARCH_DEBOUNCE_MS)
   const debouncer = debouncerRef.current
   useEffect(() => () => debouncer.cancel(), [debouncer])
+  // Global shortcut "/" or Ctrl/⌘+K focuses this box (TR-18).
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const focus = () => searchInputRef.current?.focus()
+    window.addEventListener(FOCUS_SEARCH_EVENT, focus)
+    return () => window.removeEventListener(FOCUS_SEARCH_EVENT, focus)
+  }, [])
   const [items, setItems] = useState<SupplierSummary[]>([])
   const [cursor, setCursor] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(false)
@@ -187,8 +195,10 @@ export function SupplierList({ go }: { go: Go }) {
       <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
         <div className="relative mb-2">
           <input
+            ref={searchInputRef}
             className="input pr-16"
-            placeholder="搜索公司名 / 信用代码 / 法人 / 品类…（输入即搜索）"
+            placeholder="搜索公司名 / 信用代码 / 法人 / 品类…（输入即搜索，按 / 聚焦）"
+            title="按 / 或 Ctrl+K 快速聚焦搜索"
             value={qInput}
             onChange={(e) => {
               const v = e.target.value
