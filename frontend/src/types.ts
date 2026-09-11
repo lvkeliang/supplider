@@ -301,6 +301,40 @@ export interface LocalPreference {
   configured: boolean
 }
 
+// ---- AI provider config (TR-19-A) ----
+
+export type AIFormat = 'openai' | 'anthropic'
+
+/** One-click provider preset (returned by GET /ai/config). */
+export interface AIPreset {
+  name: string
+  format: AIFormat
+  base_url: string
+  model: string
+}
+
+/** Provider config as the server returns it (api_key is REDACTED). */
+export interface AIConfig {
+  format: AIFormat | ''
+  base_url: string
+  api_key?: string // redacted — never sent back in full
+  model: string
+  max_tokens?: number
+}
+
+export interface AIConfigResponse {
+  configured: boolean
+  config: AIConfig
+  presets: AIPreset[]
+}
+
+export interface AITestResult {
+  ok: boolean
+  model?: string
+  error?: string
+  latency_ms?: number
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */

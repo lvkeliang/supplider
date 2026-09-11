@@ -3,6 +3,8 @@
 // build set VITE_API_BASE=http://127.0.0.1:7612. Business/UI code calls
 // these functions and never touches fetch or URLs directly.
 import type {
+  AIConfigResponse,
+  AITestResult,
   DuplicateMatch,
   ExpiringReport,
   Features,
@@ -342,6 +344,18 @@ export const api = {
     request<LocalPreference>('PUT', '/api/v1/preferences/local', { province, city }),
   clearLocalPreference: () =>
     request<LocalPreference>('PUT', '/api/v1/preferences/local?clear=1'),
+
+  // AI provider config (TR-19-A): read/write the self-configured model and
+  // run a connectivity test. api_key is never returned in full.
+  getAIConfig: () => request<AIConfigResponse>('GET', '/api/v1/ai/config'),
+  saveAIConfig: (cfg: {
+    format: string
+    base_url: string
+    api_key: string
+    model: string
+    max_tokens?: number
+  }) => request<AIConfigResponse>('PUT', '/api/v1/ai/config', cfg),
+  testAI: () => request<AITestResult>('GET', '/api/v1/ai/test'),
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

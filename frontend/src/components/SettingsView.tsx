@@ -6,6 +6,9 @@ import type { Go } from '../App'
 import { useToast } from './Toast'
 import { VIS_LABELS } from '../types'
 import type {
+  AIConfigResponse,
+  AIPreset,
+  AITestResult,
   LocalPreference,
   RestoreStatus,
   VisibilityPolicyResponse,
@@ -132,10 +135,175 @@ export function SettingsView({ go }: { go: Go }) {
 
       <LocalPreferenceCard />
 
+      <AIConfigCard />
+
       <BackupRestoreCard />
 
       <ShortcutsCard />
     </div>
+  )
+}
+
+/**
+ * AIConfigCard (TR-19-A): self-configured AI model. When a provider is saved
+ * the /features matrix lights the AI entry points across the app; clearing
+ * the key hides them again. The key is never echoed back in full (redacted),
+ * so the password field is left blank on load and only sent when changed.
+ */
+function AIConfigCard() {
+  const toast = useToast()
+  const [resp, setResp] = useState<AIConfigResponse | null>(null)
+  const [format, setFormat] = useState<'openai' | 'anthropic'>('openai')
+  const [baseURL, setBaseURL] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [model, setModel] = useState('')
+  const [maxTokens, setMaxTokens] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<AITestResult | null>(null)
+
+  useEffect(() => {
+    api
+      .getAIConfig()
+      .then((r) => {
+        setResp(r)
+        setFormat(r.config.format === 'anthropic' ? 'anthropic' : 'openai')
+        setBaseURL(r.config.base_url)
+        setModel(r.config.model)
+        setMaxTokens(r.config.max_tokens ? String(r.config.max_tokens) : '')
+      })
+      .catch(() => {}) // AI config is optional; card still renders
+  }, [])
+
+  const applyPreset = (p: AIPreset) => {
+    setFormat(p.format)
+    setBaseURL(p.base_url)
+    setModel(p.model)
+  }
+
+  const save = async () => {
+    setBusy(true)
+    setTestResult(null)
+    try {
+      const r = await api.saveAIConfig({
+        format,
+        base_url: baseURL.trim(),
+        api_key: apiKey.trim(),
+        model: model.trim(),
+        max_tokens: maxTokens ? Number(maxTokens) : undefined,
+      })
+      setResp(r)
+      setApiKey('') // key saved; do not keep it in the field
+      toast.success(r.configured ? 'AI 模型已保存，AI 功能已启用' : '已清除 AI 配置，AI 功能已关闭')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const test = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      setTestResult(await api.testAI())
+    } catch (e) {
+      setTestResult({ ok: false, error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const clear = () => {
+    setApiKey('')
+    setBaseURL('')
+    setModel('')
+    setFormat('openai')
+    setMaxTokens('')
+  }
+
+  const configured = resp?.configured ?? false
+
+  return (
+    <DocumentCard title="AI 模型（可选，自配模型）" defaultOpen>
+      <p className="mb-3 text-sm text-slate-500">
+        配置后启用 AI 增强（OCR 录入 / Excel 智能映射 / 自然语言搜索）。兼容
+        <b> OpenAI 格式</b>（DeepSeek / 通义 / GLM / Moonshot / Ollama）与
+        <b> Anthropic 格式</b>（Claude / DeepSeek Anthropic 端点）。不配置时平台完全可用，
+        只是隐藏 AI 入口。
+      </p>
+
+      {configured && (
+        <div className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+          <Icon name="check" size={12} strokeWidth={3} /> 已启用（模型：{resp?.config.model ?? ''}）
+        </div>
+      )}
+
+      {/* Preset quick-fill */}
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {(resp?.presets ?? []).map((p) => (
+          <button
+            key={p.name}
+            type="button"
+            onClick={() => applyPreset(p)}
+            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-brand-500 hover:text-brand-600"
+            title={`${p.base_url} · ${p.model}`}
+          >
+            {p.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="label">协议格式</span>
+          <select className="input" value={format} onChange={(e) => setFormat(e.target.value as 'openai' | 'anthropic')}>
+            <option value="openai">OpenAI 兼容（DeepSeek/通义/GLM/Ollama）</option>
+            <option value="anthropic">Anthropic（Claude / DeepSeek Anthropic）</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="label">模型 ID</span>
+          <input className="input" placeholder="如 deepseek-chat / claude-sonnet-5" value={model} onChange={(e) => setModel(e.target.value)} />
+        </label>
+        <label className="block sm:col-span-2">
+          <span className="label">Base URL</span>
+          <input className="input" placeholder="如 https://api.deepseek.com" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label">API Key（留空 = 清除配置）</span>
+          <input className="input" type="password" autoComplete="off" placeholder={configured ? '已配置（留空保持不变）' : 'sk-…'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label">最大输出 tokens（可选）</span>
+          <input className="input" type="number" min="1" placeholder="留空用默认" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
+        </label>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button className="btn-primary" disabled={busy} onClick={save}>
+          {busy ? '保存中…' : '保存'}
+        </button>
+        <button className="btn-ghost" disabled={testing || !configured} onClick={test} title={configured ? '发送一次“回复 ok”验证连通性' : '先保存配置再测试'}>
+          {testing ? '测试中…' : '测试连接'}
+        </button>
+        <button className="btn-ghost" disabled={busy} onClick={clear}>
+          清空表单
+        </button>
+      </div>
+
+      {testResult && (
+        <div
+          className={`mt-3 rounded-md px-3 py-2 text-sm ${
+            testResult.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'
+          }`}
+        >
+          {testResult.ok
+            ? `连接成功（模型 ${testResult.model ?? ''}，${testResult.latency_ms ?? 0} ms）`
+            : `连接失败：${testResult.error ?? '未知错误'}`}
+        </div>
+      )}
+    </DocumentCard>
   )
 }
 
