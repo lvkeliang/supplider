@@ -24,20 +24,22 @@ type aiConfigResponse struct {
 // aiConfigRequest is the PUT /ai/config body. APIKey empty = clear the
 // provider (disable AI).
 type aiConfigRequest struct {
-	Format    aigateway.ProviderFormat `json:"format"`
-	BaseURL   string                   `json:"base_url"`
-	APIKey    string                   `json:"api_key"`
-	Model     string                   `json:"model"`
-	MaxTokens int                      `json:"max_tokens"`
+	Format         aigateway.ProviderFormat `json:"format"`
+	BaseURL        string                   `json:"base_url"`
+	APIKey         string                   `json:"api_key"`
+	Model          string                   `json:"model"`
+	EmbeddingModel string                   `json:"embedding_model"`
+	MaxTokens      int                      `json:"max_tokens"`
 }
 
 func (r aiConfigRequest) config() aigateway.Config {
 	return aigateway.Config{
-		Format:    r.Format,
-		BaseURL:   r.BaseURL,
-		APIKey:    r.APIKey,
-		Model:     r.Model,
-		MaxTokens: r.MaxTokens,
+		Format:         r.Format,
+		BaseURL:        r.BaseURL,
+		APIKey:         r.APIKey,
+		Model:          r.Model,
+		EmbeddingModel: r.EmbeddingModel,
+		MaxTokens:      r.MaxTokens,
 	}
 }
 

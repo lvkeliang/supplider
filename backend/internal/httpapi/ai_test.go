@@ -169,3 +169,19 @@ func mustDecodeAIConfig(t *testing.T, enc string) aigateway.Config {
 	}
 	return c
 }
+
+func TestAIConfigPersistsEmbeddingModel(t *testing.T) {
+	s := newTestServer(t)
+	body := `{"format":"openai","base_url":"http://127.0.0.1:9","api_key":"k","model":"deepseek-chat","embedding_model":"text-embedding-3-small"}`
+	if w := do(t, s, http.MethodPut, "/api/v1/ai/config", body); w.Code != http.StatusOK {
+		t.Fatalf("PUT status %d body=%s", w.Code, w.Body.String())
+	}
+	w := do(t, s, http.MethodGet, "/api/v1/ai/config", "")
+	var resp aiConfigResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Config.EmbeddingModel != "text-embedding-3-small" {
+		t.Errorf("embedding_model = %q, want persisted", resp.Config.EmbeddingModel)
+	}
+}
