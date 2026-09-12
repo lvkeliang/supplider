@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, apiUrl } from '../api'
+import { api } from '../api'
 import type { DuplicateMatch, RiskReport, RiskSignal, Supplier } from '../types'
 import { STATUS_ARCHIVED, STATUS_BLACKLISTED, VIS_LABELS } from '../types'
 import { DocumentCard, Field } from './Card'
@@ -255,6 +255,18 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setUploading(false)
+    }
+  }
+
+  // 附件下载经 fetch+Blob（TR-02b）：追踪完成并显示文件名，不再用 target=_blank
+  // 锚点（Tauri webview 对 Content-Disposition 附件的保存行为无保证）。
+  const downloadAttachment = async (url: string, name: string) => {
+    toast.info('正在下载附件…')
+    try {
+      const saved = await api.download(url, name)
+      toast.success(`已下载「${saved}」`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -680,14 +692,13 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
           <ul className="space-y-1 text-sm">
             {doc.attachments!.map((a, i) => (
               <li key={i} className="flex items-center gap-2">
-                <a
-                  className="text-brand-600 hover:underline"
-                  href={apiUrl(a.url)}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  className="text-left text-brand-600 hover:underline"
+                  onClick={() => void downloadAttachment(a.url, a.name)}
                 >
                   {a.name}
-                </a>
+                </button>
                 <span className="text-xs text-slate-400">{(a.size / 1024).toFixed(0)} KB</span>
                 {!archived && (
                   <button
