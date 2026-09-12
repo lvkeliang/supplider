@@ -5,6 +5,7 @@
 import type {
   AIConfigResponse,
   AITestResult,
+  OCRResult,
   DuplicateMatch,
   ExpiringReport,
   Features,
@@ -356,6 +357,15 @@ export const api = {
     max_tokens?: number
   }) => request<AIConfigResponse>('PUT', '/api/v1/ai/config', cfg),
   testAI: () => request<AITestResult>('GET', '/api/v1/ai/test'),
+  // OCR 辅助录入 (TR-19-B): upload a license photo, get extracted fields.
+  ocrUpload: async (file: File): Promise<OCRResult> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await guardedFetch('/api/v1/ai/ocr', { method: 'POST', body: form })
+    const data = await res.json().catch(() => undefined)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
+    return data as OCRResult
+  },
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

@@ -246,6 +246,7 @@ export default function App() {
           <SupplierForm
             go={go}
             visibilityLevels={features?.visibility_levels ?? 2}
+            aiOCR={features?.ai_ocr_entry ?? false}
           />
         )}
         {view.name === 'detail' && <SupplierDetail id={view.id} go={go} />}
@@ -254,6 +255,7 @@ export default function App() {
             go={go}
             id={view.id}
             visibilityLevels={features?.visibility_levels ?? 2}
+            aiOCR={features?.ai_ocr_entry ?? false}
           />
         )}
         {view.name === 'import' && (

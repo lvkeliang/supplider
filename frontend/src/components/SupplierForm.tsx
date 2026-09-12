@@ -21,6 +21,7 @@ import {
   type SupplierTypeChoice,
 } from '../supplierType'
 import { normalizeEstablishmentDate } from '../date'
+import type { OCRResult } from '../types'
 
 // 文档式录入:固定核心字段 + 可自由增删的自定义字段(不预定义字段名/类型)。
 // 资质/产品/绩效也是可增删的行,贴合施工商记资质设备、贸易商记品牌规格的差异。
@@ -114,7 +115,7 @@ function fromSupplier(s: Supplier): FormState {
   }
 }
 
-export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string; visibilityLevels: number }) {
+export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: Go; id?: string; visibilityLevels: number; aiOCR?: boolean }) {
   const toast = useToast()
   const editing = !!id
   const [form, setForm] = useState<FormState>(() => emptyForm(visibilityLevels))
@@ -122,6 +123,7 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [dupes, setDupes] = useState<DuplicateMatch[]>([])
+  const [ocrBusy, setOcrBusy] = useState(false)
   const dupReq = useRef(0)
 
   useEffect(() => {
@@ -181,6 +183,46 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
     toast.success(
       `已识别：${[parts.province, parts.city, parts.district].filter(Boolean).join(' · ')}`,
     )
+  }
+
+  // OCR 辅助录入 (TR-19-B): upload a license photo, prefill the form from the
+  // extracted fields. Region is derived from the address when possible;
+  // otherwise the user fills the cascader by hand.
+  const ocrFileRef = useRef<HTMLInputElement>(null)
+  const runOCR = async (file: File) => {
+    setOcrBusy(true)
+    try {
+      const r: OCRResult = await api.ocrUpload(file)
+      const est = normalizeEstablishmentDate(r.establishment_date)
+      const estText = est === null ? r.establishment_date : est
+
+      const patch: Partial<BasicInfo> = {}
+      if (r.company_name) patch.company_name = r.company_name
+      if (r.credit_code) patch.credit_code = r.credit_code
+      if (r.legal_person) patch.legal_person = r.legal_person
+      if (r.registered_capital) patch.registered_capital = r.registered_capital
+      if (r.business_scope) patch.business_scope = r.business_scope
+      if (r.address) patch.address = r.address
+      if (Object.keys(patch).length) setBasic(patch)
+      if (estText) setForm((f) => ({ ...f, estDateText: estText }))
+
+      // Try to structure the address into province/city/district.
+      const regionParts = splitRegion(r.address)
+      if (regionParts.province) {
+        setRegion({
+          province: regionParts.province,
+          city: regionParts.city ?? (citiesOf(regionParts.province).length === 1 ? citiesOf(regionParts.province)[0] : ''),
+          district: regionParts.district ?? '',
+        })
+      }
+
+      toast.success(r.company_name ? `已识别「${r.company_name}」并填入表单，请核对后保存` : '已识别并填入表单，请核对后保存')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOcrBusy(false)
+      if (ocrFileRef.current) ocrFileRef.current.value = ''
+    }
   }
 
   const buildCustomFields = (): Record<string, unknown> => {
@@ -357,7 +399,32 @@ export function SupplierForm({ go, id, visibilityLevels }: { go: Go; id?: string
 
       {/* 基本信息 */}
       <section id="form-sec-basic" className="form-section space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700">基本信息</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-700">基本信息</h2>
+          {aiOCR && (
+            <>
+              <input
+                ref={ocrFileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) void runOCR(f)
+                }}
+              />
+              <button
+                type="button"
+                className="btn-ghost !py-1 text-xs"
+                disabled={ocrBusy}
+                onClick={() => ocrFileRef.current?.click()}
+                title="上传营业执照/资质证书照片，AI 自动提取字段填入表单"
+              >
+                <Icon name="upload" size={14} /> {ocrBusy ? '识别中…' : '图片录入'}
+              </button>
+            </>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label className="label">公司名称 *</label>

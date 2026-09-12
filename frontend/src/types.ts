@@ -335,6 +335,17 @@ export interface AITestResult {
   latency_ms?: number
 }
 
+/** Extracted supplier fields from OCR 辅助录入 (TR-19-B). Empty string = not found. */
+export interface OCRResult {
+  company_name: string
+  credit_code: string
+  legal_person: string
+  registered_capital: string
+  establishment_date: string
+  business_scope: string
+  address: string
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */
