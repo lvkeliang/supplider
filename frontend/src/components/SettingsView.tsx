@@ -457,12 +457,12 @@ function BackupRestoreCard() {
  * the database (travels with backups), honored by HTTP/CLI/MCP alike.
  */
 function LocalPreferenceCard() {
+  const toast = useToast()
   const [pref, setPref] = useState<LocalPreference | null>(null)
   const [province, setProvince] = useState('')
   const [city, setCity] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [note, setNote] = useState('')
 
   useEffect(() => {
     api
@@ -482,11 +482,10 @@ function LocalPreferenceCard() {
     }
     setBusy(true)
     setError('')
-    setNote('')
     try {
       const p = await api.saveLocalPreference(province.trim(), city.trim())
       setPref(p)
-      setNote('已保存：列表与搜索中本地供应商将排在最前（仅排序，不影响筛选）。')
+      toast.success('已保存：列表与搜索中本地供应商将排在最前（仅排序，不影响筛选）。')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -497,13 +496,12 @@ function LocalPreferenceCard() {
   const clear = async () => {
     setBusy(true)
     setError('')
-    setNote('')
     try {
       const p = await api.clearLocalPreference()
       setPref(p)
       setProvince('')
       setCity('')
-      setNote('已清除本地偏好，列表恢复默认排序。')
+      toast.success('已清除本地偏好，列表恢复默认排序。')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -558,11 +556,6 @@ function LocalPreferenceCard() {
       </div>
       {error && (
         <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
-      )}
-      {note && !error && (
-        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          {note}
-        </div>
       )}
     </DocumentCard>
   )

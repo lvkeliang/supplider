@@ -339,7 +339,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                 <button className="btn-primary" disabled={busy} onClick={unblacklist}>移出黑名单</button>
               ) : (
                 <>
-                  <button className="btn-ghost" disabled={busy} onClick={openMerge} title="把另一条重复档案并入当前档案（并入绩效/附件/资质等，对方归档），用于清理历史重复录入"><Icon name="shuffle" size={15} /> 合并重复</button>
+                  <button className="btn-ghost" disabled={busy} onClick={openMerge} title="把另一条重复档案并入当前档案（并入绩效/附件/资质等，对方归档），用于清理历史重复录入"><Icon name="shuffle" size={15} /> 合并重复…</button>
                   <button className="btn-ghost" disabled={busy} onClick={blacklist} title="列入黑名单（淘汰/禁用）：仍可搜到但醒目标记"><Icon name="ban" size={15} /> 列入黑名单</button>
                   <button className="btn-danger" disabled={busy} onClick={archive}>归档</button>
                 </>
