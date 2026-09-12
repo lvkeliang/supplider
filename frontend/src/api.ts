@@ -5,6 +5,7 @@
 import type {
   AIConfigResponse,
   AITestResult,
+  NLSearchResult,
   OCRResult,
   DuplicateMatch,
   ExpiringReport,
@@ -370,6 +371,9 @@ export const api = {
   // previewed workbook (user still reviews/adjusts it).
   aiExcelMap: (headers: string[], sample: string[][]) =>
     request<{ mapping: Record<string, string> }>('POST', '/api/v1/ai/excel-map', { headers, sample }),
+  // 自然语言搜索 (TR-19-D): turn a free-form sentence into a structured filter.
+  aiNLSearch: (query: string) =>
+    request<NLSearchResult>('POST', '/api/v1/ai/nl-search', { query }),
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

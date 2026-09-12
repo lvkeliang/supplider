@@ -335,6 +335,17 @@ export interface AITestResult {
   latency_ms?: number
 }
 
+/** Structured filter produced by 自然语言搜索 (TR-19-D). Empty/0 = unconstrained. */
+export interface NLSearchResult {
+  keyword: string
+  province: string
+  city: string
+  district: string
+  category: string
+  min_qual_level: string
+  min_rating: number
+}
+
 /** Extracted supplier fields from OCR 辅助录入 (TR-19-B). Empty string = not found. */
 export interface OCRResult {
   company_name: string

@@ -241,7 +241,7 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6">
-        {view.name === 'list' && <SupplierList go={go} />}
+        {view.name === 'list' && <SupplierList go={go} aiNLSearch={features?.ai_nl_search ?? false} />}
         {view.name === 'new' && (
           <SupplierForm
             go={go}

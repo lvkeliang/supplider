@@ -43,9 +43,13 @@ function expiryTag(bucket: string): string {
  * backend never returns full documents for list calls — performance red
  * line of ≤100 rows/page, no OFFSET).
  */
-export function SupplierList({ go }: { go: Go }) {
+export function SupplierList({ go, aiNLSearch = false }: { go: Go; aiNLSearch?: boolean }) {
   const toast = useToast()
   const [params, setParams] = useState<ListParams>({ limit: 20 })
+  // 自然语言搜索模式 (TR-19-D)：开启后关键词框当作整句需求，提交时经
+  // LLM 解析成结构化筛选并套用；手动关键词+筛选仍是默认/降级路径。
+  const [aiMode, setAiMode] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
   // Controlled keyword box (TR-03): the text field updates instantly while
   // the list query commits 300ms after typing stops (Enter or the search
   // icon commits immediately; the clear icon clears and commits at once).
@@ -148,6 +152,41 @@ export function SupplierList({ go }: { go: Go }) {
     setParams((p) => ((p.q ?? '') === (q ?? '') ? p : { ...p, q }))
   }, [])
 
+  // AI 自然语言搜索 (TR-19-D)：把整句需求解析成结构化筛选并套用。
+  const runNLSearch = async (raw: string) => {
+    const q = raw.trim()
+    if (!q) {
+      applyQuery('')
+      return
+    }
+    setAiBusy(true)
+    try {
+      const r = await api.aiNLSearch(q)
+      setParams((p) => ({
+        ...p,
+        q: r.keyword || undefined,
+        province: r.province || undefined,
+        city: r.city || undefined,
+        district: r.district || undefined,
+        category: r.category || undefined,
+        min_qual_level: r.min_qual_level || undefined,
+        min_rating: r.min_rating > 0 ? r.min_rating : undefined,
+      }))
+      const parts = [
+        r.province, r.city, r.district,
+        r.category, r.min_qual_level,
+        r.min_rating > 0 ? `${r.min_rating} 分以上` : '',
+      ].filter(Boolean)
+      toast.success(
+        parts.length ? `已解析为筛选：${parts.join(' · ')}` : '已解析为关键词搜索',
+      )
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
   // Export the CURRENT filter view. Fetch as a Blob (instead of a
   // fire-and-forget anchor) so the transfer is tracked: preparing → done
   // with the real filename → failure, all via toast (TR-02). JSON =
@@ -196,19 +235,39 @@ export function SupplierList({ go }: { go: Go }) {
         <div className="relative mb-2">
           <input
             ref={searchInputRef}
-            className="input pr-16"
-            placeholder="搜索公司名 / 信用代码 / 法人 / 品类…（输入即搜索，按 / 聚焦）"
-            title="按 / 或 Ctrl+K 快速聚焦搜索"
+            className="input pr-24"
+            placeholder={
+              aiMode
+                ? '用一句话描述需求，如：杭州本地能做市政工程的二级资质以上供应商'
+                : '搜索公司名 / 信用代码 / 法人 / 品类…（输入即搜索，按 / 聚焦）'
+            }
+            title={aiMode ? '回车或点搜索解析成筛选' : '按 / 或 Ctrl+K 快速聚焦搜索'}
             value={qInput}
             onChange={(e) => {
               const v = e.target.value
               setQInput(v)
-              debouncer.schedule(() => applyQuery(v))
+              if (!aiMode) debouncer.schedule(() => applyQuery(v))
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') debouncer.flush(() => applyQuery(qInput))
+              if (e.key === 'Enter') {
+                if (aiMode) void runNLSearch(qInput)
+                else debouncer.flush(() => applyQuery(qInput))
+              }
             }}
           />
+          {aiNLSearch && (
+            <button
+              type="button"
+              aria-label={aiMode ? '切回普通搜索' : 'AI 自然语言搜索'}
+              title={aiMode ? '切回普通关键词搜索' : '用一句话描述需求，AI 解析成筛选'}
+              className={`absolute right-10 top-1/2 -translate-y-1/2 rounded px-1.5 text-xs font-semibold leading-5 ${
+                aiMode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-brand-600'
+              }`}
+              onClick={() => setAiMode((m) => !m)}
+            >
+              AI
+            </button>
+          )}
           {qInput !== '' && (
             <button
               type="button"
@@ -217,7 +276,8 @@ export function SupplierList({ go }: { go: Go }) {
               className="absolute right-9 top-1/2 -translate-y-1/2 rounded px-1 leading-none text-slate-400 hover:text-slate-700"
               onClick={() => {
                 setQInput('')
-                debouncer.flush(() => applyQuery(''))
+                if (aiMode) void runNLSearch('')
+                else debouncer.flush(() => applyQuery(''))
               }}
             >
               <Icon name="x" size={14} />
@@ -228,9 +288,12 @@ export function SupplierList({ go }: { go: Go }) {
             aria-label="搜索"
             title="搜索"
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-slate-500 hover:text-brand-600"
-            onClick={() => debouncer.flush(() => applyQuery(qInput))}
+            onClick={() => {
+              if (aiMode) void runNLSearch(qInput)
+              else debouncer.flush(() => applyQuery(qInput))
+            }}
           >
-            <Icon name="search" size={16} />
+            {aiBusy ? <span className="text-xs">…</span> : <Icon name="search" size={16} />}
           </button>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
