@@ -184,6 +184,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/ai/config", s.handleSaveAIConfig)
 	s.Mux.HandleFunc("GET /api/v1/ai/test", s.handleTestAIConfig)
 	s.Mux.HandleFunc("POST /api/v1/ai/ocr", s.handleOCR)
+	s.Mux.HandleFunc("POST /api/v1/ai/excel-map", s.handleAIExcelMap)
 	s.Mux.HandleFunc("POST /api/v1/suppliers", s.handleCreate)
 	s.Mux.HandleFunc("GET /api/v1/suppliers", s.handleList)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/duplicates", s.handleDuplicates)

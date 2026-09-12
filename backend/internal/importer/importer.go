@@ -84,6 +84,16 @@ type FieldOption struct {
 	Required bool   `json:"required"`
 }
 
+// FieldOptions returns the mappable field list (key + label + required)
+// shared by the import preview dropdowns and the AI column-mapping prompt.
+func FieldOptions() []FieldOption {
+	opts := make([]FieldOption, 0, len(fields))
+	for _, spec := range fields {
+		opts = append(opts, FieldOption{Key: spec.Key, Label: spec.Label, Required: spec.Required})
+	}
+	return opts
+}
+
 // fieldByKey indexes specs by key.
 var fieldByKey = func() map[string]fieldSpec {
 	m := make(map[string]fieldSpec, len(fields))
@@ -261,10 +271,7 @@ func Inspect(data []byte) (*Inspection, error) {
 		sample = sample[:5]
 	}
 
-	opts := make([]FieldOption, 0, len(fields)+2)
-	for _, spec := range fields {
-		opts = append(opts, FieldOption{Key: spec.Key, Label: spec.Label, Required: spec.Required})
-	}
+	opts := FieldOptions()
 
 	return &Inspection{
 		Headers:       headers,
