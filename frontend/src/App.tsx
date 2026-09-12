@@ -259,7 +259,11 @@ export default function App() {
           />
         )}
         {view.name === 'import' && (
-          <ImportView go={go} visibilityLevels={features?.visibility_levels ?? 2} />
+          <ImportView
+            go={go}
+            visibilityLevels={features?.visibility_levels ?? 2}
+            aiExcelMapping={features?.ai_excel_mapping ?? false}
+          />
         )}
         {view.name === 'settings' && <SettingsView go={go} />}
         {view.name === 'compare' && <CompareView ids={view.ids} go={go} />}

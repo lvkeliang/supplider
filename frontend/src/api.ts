@@ -366,6 +366,10 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
     return data as OCRResult
   },
+  // Excel 智能列映射 (TR-19-C): LLM suggests a column→field mapping for the
+  // previewed workbook (user still reviews/adjusts it).
+  aiExcelMap: (headers: string[], sample: string[][]) =>
+    request<{ mapping: Record<string, string> }>('POST', '/api/v1/ai/excel-map', { headers, sample }),
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

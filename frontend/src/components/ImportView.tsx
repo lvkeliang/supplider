@@ -14,7 +14,7 @@ import { Icon } from './Icon'
  * mapping → adjust each column (fixed field / 自定义字段 / 忽略) → commit →
  * per-row report. Invalid rows are reported without aborting valid ones.
  */
-export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels: number }) {
+export function ImportView({ go, visibilityLevels, aiExcelMapping = false }: { go: Go; visibilityLevels: number; aiExcelMapping?: boolean }) {
   const toast = useToast()
   const [file, setFile] = useState<File | null>(null)
   const [insp, setInsp] = useState<Inspection | null>(null)
@@ -24,6 +24,7 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
   // 录入去重：勾选后命中既有供应商（含黑名单/归档）的行直接跳过；默认只警告、仍导入。
   const [skipDuplicates, setSkipDuplicates] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [aiMappingBusy, setAiMappingBusy] = useState(false)
   const [error, setError] = useState('')
   const [report, setReport] = useState<ImportReport | null>(null)
 
@@ -71,6 +72,27 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
 
   const setMap = (col: number, key: string) =>
     setMapping((m) => ({ ...m, [String(col)]: key }))
+
+  // AI 智能列映射 (TR-19-C)：让 LLM 按表头+示例值建议映射，应用后可再手动
+  // 微调。无 AI 配置时按钮由 aiExcelMapping 门控隐藏。
+  const runAIMapping = async () => {
+    if (!insp) return
+    setAiMappingBusy(true)
+    try {
+      const res = await api.aiExcelMap(insp.headers, insp.sample)
+      const suggested = res.mapping ?? {}
+      if (Object.keys(suggested).length === 0) {
+        toast.info('AI 未给出可用的映射建议，请手动映射')
+        return
+      }
+      setMapping((m) => ({ ...m, ...suggested }))
+      toast.success(`已应用 AI 建议的 ${Object.keys(suggested).length} 列映射，请核对后导入`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiMappingBusy(false)
+    }
+  }
 
   // Required fixed fields that are not mapped to any column yet.
   const missingRequired = useMemo(() => {
@@ -126,6 +148,17 @@ export function ImportView({ go, visibilityLevels }: { go: Go; visibilityLevels:
             <h2 className="text-sm font-semibold text-slate-700">
               列映射（识别到 {insp.total_data_rows} 行数据）
             </h2>
+            {aiExcelMapping && (
+              <button
+                type="button"
+                className="btn-ghost !py-1 text-xs"
+                disabled={aiMappingBusy}
+                onClick={() => void runAIMapping()}
+                title="让 AI 按表头与示例值建议列映射，可再手动调整"
+              >
+                <Icon name="shuffle" size={14} /> {aiMappingBusy ? '建议中…' : 'AI 建议映射'}
+              </button>
+            )}
           </div>
           {missingRequired.length > 0 && (
             <div className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
