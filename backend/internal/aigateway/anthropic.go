@@ -171,7 +171,9 @@ func (a *AnthropicAdapter) Complete(ctx context.Context, req ChatRequest) (ChatR
 	}, nil
 }
 
-// Embed returns ErrAIDisabled (see OpenAIAdapter.Embed).
+// Embed returns ErrAIDisabled: the Anthropic Messages API has no public
+// embeddings endpoint, so semantic search stays hidden on this format
+// (AI 原生但可降级).
 func (a *AnthropicAdapter) Embed(ctx context.Context, texts []string) ([]EmbeddingItem, error) {
 	return nil, ErrAIDisabled
 }

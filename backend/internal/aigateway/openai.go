@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,11 +17,12 @@ import (
 // deliberately self-contained (net/http only, no SDK) so the personal build
 // stays zero-dependency.
 type OpenAIAdapter struct {
-	baseURL   string
-	apiKey    string
-	model     string
-	maxTokens int
-	client    *http.Client
+	baseURL        string
+	apiKey         string
+	model          string
+	embeddingModel string
+	maxTokens      int
+	client         *http.Client
 }
 
 // NewOpenAIAdapter builds an adapter against a base URL like
@@ -30,11 +32,12 @@ func NewOpenAIAdapter(cfg Config, client *http.Client) *OpenAIAdapter {
 		client = &http.Client{Timeout: 120 * time.Second}
 	}
 	return &OpenAIAdapter{
-		baseURL:   strings.TrimRight(cfg.BaseURL, "/"),
-		apiKey:    cfg.APIKey,
-		model:     cfg.Model,
-		maxTokens: cfg.MaxTokens,
-		client:    client,
+		baseURL:        strings.TrimRight(cfg.BaseURL, "/"),
+		apiKey:         cfg.APIKey,
+		model:          cfg.Model,
+		embeddingModel: cfg.EmbeddingModel,
+		maxTokens:      cfg.MaxTokens,
+		client:         client,
 	}
 }
 
@@ -153,6 +156,65 @@ func (a *OpenAIAdapter) Complete(ctx context.Context, req ChatRequest) (ChatResp
 
 // Embed returns ErrAIDisabled: vector embedding (bge-m3) is a later stage
 // (TR-19-E); the port exists so the non-AI path is chosen until then.
+// Embed computes vectors via the OpenAI /embeddings endpoint. It requires a
+// configured EmbeddingModel; without one it returns ErrAIDisabled so semantic
+// search stays hidden (AI 原生但可降级).
 func (a *OpenAIAdapter) Embed(ctx context.Context, texts []string) ([]EmbeddingItem, error) {
-	return nil, ErrAIDisabled
+	if a.embeddingModel == "" {
+		return nil, ErrAIDisabled
+	}
+	if len(texts) == 0 {
+		return nil, nil
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"model": a.embeddingModel,
+		"input": texts,
+	})
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		a.baseURL+"/embeddings", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
+
+	resp, err := a.client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, providerError("openai", resp.StatusCode, raw)
+	}
+
+	var parsed struct {
+		Data []struct {
+			Index     int       `json:"index"`
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("aigateway: decode openai embeddings: %w", err)
+	}
+	if parsed.Error != nil {
+		return nil, fmt.Errorf("aigateway: openai api error: %s", parsed.Error.Message)
+	}
+
+	out := make([]EmbeddingItem, 0, len(parsed.Data))
+	for _, d := range parsed.Data {
+		out = append(out, EmbeddingItem{ID: strconv.Itoa(d.Index), Vector: d.Embedding})
+	}
+	return out, nil
 }

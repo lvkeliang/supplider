@@ -239,3 +239,50 @@ func TestAnthropicAdapterImageContent(t *testing.T) {
 		t.Errorf("source = %v", src)
 	}
 }
+
+// Embeddings (TR-19-E foundation): OpenAI /embeddings with a configured
+// embedding model; empty model → ErrAIDisabled; Anthropic → ErrAIDisabled.
+
+func TestOpenAIAdapterEmbed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/embeddings" {
+			t.Errorf("path = %q, want /embeddings", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer k" {
+			t.Errorf("Authorization = %q", got)
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if req["model"] != "text-embedding-3-small" {
+			t.Errorf("model = %v", req["model"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2]},{"index":1,"embedding":[0.3,0.4]}]}`))
+	}))
+	defer srv.Close()
+
+	a := NewOpenAIAdapter(Config{BaseURL: srv.URL, APIKey: "k", Model: "chat", EmbeddingModel: "text-embedding-3-small"}, nil)
+	items, err := a.Embed(context.Background(), []string{"a", "b"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != "0" || len(items[0].Vector) != 2 || items[0].Vector[0] != 0.1 {
+		t.Errorf("items = %+v", items)
+	}
+}
+
+func TestOpenAIAdapterEmbedDisabledWithoutModel(t *testing.T) {
+	a := NewOpenAIAdapter(Config{BaseURL: "http://x", APIKey: "k", Model: "chat"}, nil)
+	if _, err := a.Embed(context.Background(), []string{"a"}); err != ErrAIDisabled {
+		t.Errorf("Embed err = %v, want ErrAIDisabled", err)
+	}
+}
+
+func TestAnthropicAdapterEmbedDisabled(t *testing.T) {
+	a := NewAnthropicAdapter(Config{BaseURL: "http://x", APIKey: "k", Model: "claude", EmbeddingModel: "bge-m3"}, nil)
+	if _, err := a.Embed(context.Background(), []string{"a"}); err != ErrAIDisabled {
+		t.Errorf("Embed err = %v, want ErrAIDisabled", err)
+	}
+}

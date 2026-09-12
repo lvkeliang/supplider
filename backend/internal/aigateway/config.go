@@ -27,6 +27,11 @@ type Config struct {
 	APIKey string `json:"api_key,omitempty"`
 	// Model is the concrete model id (e.g. deepseek-chat, claude-sonnet-5).
 	Model string `json:"model"`
+	// EmbeddingModel is the model for bge-m3-style semantic vectors
+	// (e.g. text-embedding-3-small, or bge-m3 on a local Ollama). Empty =
+	// embeddings disabled: Embed() returns ErrAIDisabled and semantic search
+	// stays hidden (AI 原生但可降级).
+	EmbeddingModel string `json:"embedding_model,omitempty"`
 	// MaxTokens caps output; 0 means the adapter default.
 	MaxTokens int `json:"max_tokens,omitempty"`
 }
