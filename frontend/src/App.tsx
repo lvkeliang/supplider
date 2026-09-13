@@ -7,6 +7,7 @@ import { SupplierForm } from './components/SupplierForm'
 import { SupplierDetail } from './components/SupplierDetail'
 import { ImportView } from './components/ImportView'
 import { SettingsView } from './components/SettingsView'
+import { DocSearch } from './components/DocSearch'
 import { CompareView } from './components/CompareView'
 import { NotificationBell } from './components/NotificationBell'
 import { Logo } from './components/Logo'
@@ -21,6 +22,7 @@ type View =
   | { name: 'edit'; id: string }
   | { name: 'import' }
   | { name: 'settings' }
+  | { name: 'docsearch' }
   | { name: 'compare'; ids: string[] }
 
 const TIER_LABELS: Record<string, string> = {
@@ -241,7 +243,13 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6">
-        {view.name === 'list' && <SupplierList go={go} aiNLSearch={features?.ai_nl_search ?? false} />}
+        {view.name === 'list' && (
+          <SupplierList
+            go={go}
+            aiNLSearch={features?.ai_nl_search ?? false}
+            aiDocSearch={features?.ai_doc_search ?? false}
+          />
+        )}
         {view.name === 'new' && (
           <SupplierForm
             go={go}
@@ -266,6 +274,7 @@ export default function App() {
           />
         )}
         {view.name === 'settings' && <SettingsView go={go} />}
+        {view.name === 'docsearch' && <DocSearch go={go} />}
         {view.name === 'compare' && <CompareView ids={view.ids} go={go} />}
       </main>
     </div>

@@ -77,13 +77,17 @@ func Default() Features {
 	}
 }
 
-// WithAIState returns a copy with AI flags flipped together — called once
-// at startup after probing the AI gateway for a configured provider.
-func (f Features) WithAIState(enabled bool) Features {
+// WithAIState returns a copy with AI flags flipped from the live gateway:
+// the chat-only features (OCR/Excel-map/NL-search) follow `enabled` (a
+// provider is configured), while document/semantic search (AIDocSearch)
+// additionally requires an embedding model (`canEmbed`) — the Anthropic
+// Messages API has no /embeddings endpoint, so semantic search stays hidden
+// on that format even though chat works (AI 原生但可降级).
+func (f Features) WithAIState(enabled, canEmbed bool) Features {
 	f.AIEnabled = enabled
 	f.AIOCREntry = enabled
-	f.AIDocSearch = enabled
 	f.AINLSearch = enabled
 	f.AIExcelMapping = enabled
+	f.AIDocSearch = canEmbed
 	return f
 }

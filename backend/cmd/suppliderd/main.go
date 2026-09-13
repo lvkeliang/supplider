@@ -91,7 +91,7 @@ func main() {
 	// primed on demand via POST /ai/index.
 	vectorIndex := memory.New()
 
-	feats := featureflag.Default().WithAIState(gateway.Enabled())
+	feats := featureflag.Default().WithAIState(gateway.Enabled(), gateway.CanEmbed())
 
 	// Single binary serves API + embedded UI. CORS lets the Tauri webview
 	// (tauri://localhost / tauri.localhost) call the loopback sidecar.

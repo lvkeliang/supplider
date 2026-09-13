@@ -20,7 +20,7 @@ import (
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	svc := supplier.NewService(memory.New())
-	return New(svc, featureflag.Default().WithAIState(false))
+	return New(svc, featureflag.Default().WithAIState(false, false))
 }
 
 func do(t *testing.T, s *Server, method, path, body string) *httptest.ResponseRecorder {

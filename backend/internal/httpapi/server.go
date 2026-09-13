@@ -133,6 +133,14 @@ func (s *Server) aiEnabled() bool {
 	return s.gateway != nil && s.gateway.Enabled()
 }
 
+// aiCanEmbed reports whether the configured provider can compute vectors for
+// semantic/document search (drives the ai_doc_search flag).
+func (s *Server) aiCanEmbed() bool {
+	s.aiMu.RLock()
+	defer s.aiMu.RUnlock()
+	return s.gateway != nil && s.gateway.CanEmbed()
+}
+
 func (s *Server) currentAIConfig() aigateway.Config {
 	s.aiMu.RLock()
 	gw := s.gateway
@@ -251,7 +259,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFeatures(w http.ResponseWriter, r *http.Request) {
 	// AI flags are derived from the live gateway (not the startup snapshot)
 	// so saving a provider config lights the AI entry points immediately.
-	writeJSON(w, http.StatusOK, s.Features.WithAIState(s.aiEnabled()))
+	writeJSON(w, http.StatusOK, s.Features.WithAIState(s.aiEnabled(), s.aiCanEmbed()))
 }
 
 // ---------- suppliers ----------

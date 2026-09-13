@@ -83,6 +83,38 @@ func TestDocSearchUnconfiguredReturns503(t *testing.T) {
 	}
 }
 
+// TestDocSearchFlagRequiresEmbeddingModel pins the feature-flag split: a
+// chat-only provider lights ai_enabled/ai_nl_search but NOT ai_doc_search,
+// which additionally needs an embedding model (Anthropic has no /embeddings).
+func TestDocSearchFlagRequiresEmbeddingModel(t *testing.T) {
+	upstream := embeddingsUpstream(t)
+	defer upstream.Close()
+
+	s := newTestServer(t)
+	s.WithGateway(aigateway.New(aigateway.Config{
+		Format:  aigateway.FormatOpenAI,
+		BaseURL: upstream.URL,
+		APIKey:  "sk-test",
+		Model:   "deepseek-chat",
+	}, nil))
+
+	w := do(t, s, http.MethodGet, "/api/v1/features", "")
+	var feats struct {
+		AIEnabled   bool `json:"ai_enabled"`
+		AINLSearch  bool `json:"ai_nl_search"`
+		AIDocSearch bool `json:"ai_doc_search"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &feats); err != nil {
+		t.Fatal(err)
+	}
+	if !feats.AIEnabled || !feats.AINLSearch {
+		t.Fatalf("chat features should be on: %+v", feats)
+	}
+	if feats.AIDocSearch {
+		t.Fatalf("ai_doc_search must be false without an embedding model: %+v", feats)
+	}
+}
+
 func TestDocSearchRequiresEmbeddingModel(t *testing.T) {
 	upstream := docSearchUpstream(t, "")
 	defer upstream.Close()

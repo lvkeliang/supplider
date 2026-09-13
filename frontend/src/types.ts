@@ -357,6 +357,35 @@ export interface OCRResult {
   address: string
 }
 
+// ---- 文档分析搜索 (TR-19-E) ----
+
+/** LLM-extracted requirement from a requirement document. Empty = unconstrained. */
+export interface DocRequirement {
+  requirement: string
+  province: string
+  city: string
+  district: string
+  category: string
+  min_qual_level: string
+}
+
+/** One ranked recommendation: the list summary + cosine score + match reason. */
+export interface DocSearchResult extends SupplierSummary {
+  score: number
+  reason: string
+}
+
+export interface DocSearchResponse {
+  requirement: DocRequirement
+  results: DocSearchResult[]
+}
+
+/** POST /ai/index (rebuild the vector index) result. */
+export interface SemanticIndexResult {
+  total: number
+  indexed: number
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */

@@ -7,6 +7,8 @@ import type {
   AITestResult,
   NLSearchResult,
   OCRResult,
+  DocSearchResponse,
+  SemanticIndexResult,
   DuplicateMatch,
   ExpiringReport,
   Features,
@@ -374,6 +376,19 @@ export const api = {
   // 自然语言搜索 (TR-19-D): turn a free-form sentence into a structured filter.
   aiNLSearch: (query: string) =>
     request<NLSearchResult>('POST', '/api/v1/ai/nl-search', { query }),
+  // 文档分析搜索 (TR-19-E): rebuild the vector index, then analyze a pasted
+  // requirement document (or an uploaded .txt/.md file) → ranked recommendations.
+  aiIndex: () => request<SemanticIndexResult>('POST', '/api/v1/ai/index'),
+  aiDocSearch: (text: string, topK = 10) =>
+    request<DocSearchResponse>('POST', '/api/v1/ai/doc-search', { text, top_k: topK }),
+  aiDocSearchFile: async (file: File): Promise<DocSearchResponse> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await guardedFetch('/api/v1/ai/doc-search', { method: 'POST', body: form })
+    const data = await res.json().catch(() => undefined)
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
+    return data as DocSearchResponse
+  },
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

@@ -26,7 +26,7 @@ func TestAttachmentDownloadStatusClassification(t *testing.T) {
 		t.Fatalf("localfs: %v", err)
 	}
 	svc := supplier.NewService(memory.New())
-	s := New(svc, featureflag.Default().WithAIState(false)).WithObjects(store)
+	s := New(svc, featureflag.Default().WithAIState(false, false)).WithObjects(store)
 
 	// Percent-encoded traversal reaches the object key (the bare "/.." form
 	// is cleaned to a 301 by net/http before reaching the handler, so it is
@@ -86,7 +86,7 @@ func TestAttachmentBytesReferenceCountedAcrossMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := supplier.NewService(memory.New())
-	s := New(svc, featureflag.Default().WithAIState(false)).WithObjects(objects)
+	s := New(svc, featureflag.Default().WithAIState(false, false)).WithObjects(objects)
 	ctx := context.Background()
 
 	create := func(name, code string) string {

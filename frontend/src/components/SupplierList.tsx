@@ -43,7 +43,15 @@ function expiryTag(bucket: string): string {
  * backend never returns full documents for list calls — performance red
  * line of ≤100 rows/page, no OFFSET).
  */
-export function SupplierList({ go, aiNLSearch = false }: { go: Go; aiNLSearch?: boolean }) {
+export function SupplierList({
+  go,
+  aiNLSearch = false,
+  aiDocSearch = false,
+}: {
+  go: Go
+  aiNLSearch?: boolean
+  aiDocSearch?: boolean
+}) {
   const toast = useToast()
   const [params, setParams] = useState<ListParams>({ limit: 20 })
   // 自然语言搜索模式 (TR-19-D)：开启后关键词框当作整句需求，提交时经
@@ -215,6 +223,11 @@ export function SupplierList({ go, aiNLSearch = false }: { go: Go; aiNLSearch?: 
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-slate-800">供应商</h1>
         <div className="flex gap-2">
+          {aiDocSearch && (
+            <button className="btn-ghost" onClick={() => go({ name: 'docsearch' })} title="上传或粘贴需求文档，AI 语义匹配推荐供应商">
+              <Icon name="scales" size={15} /> AI 文档搜索
+            </button>
+          )}
           <button className="btn-ghost" onClick={() => go({ name: 'import' })}>
             <Icon name="upload" size={15} /> Excel 导入
           </button>
