@@ -27,6 +27,7 @@ import (
 	"github.com/supplider/supplider/backend/internal/storefactory"
 	"github.com/supplider/supplider/backend/internal/supplier"
 	"github.com/supplider/supplider/backend/internal/tier"
+	"github.com/supplider/supplider/backend/internal/usage"
 	"github.com/supplider/supplider/backend/internal/vectorfactory"
 	"github.com/supplider/supplider/backend/internal/webui"
 )
@@ -85,6 +86,8 @@ func main() {
 	}
 	aiCfg, _ := aigateway.DecodeConfig(rawAI)
 	gateway := aigateway.New(aiCfg, nil)
+	// Record per-month AI token usage (persisted in the settings store).
+	gateway.SetUsageSink(usage.New(store))
 
 	// Semantic search (TR-19-E) vector index. Personal tier persists it to
 	// <DataDir>/vectors.db (SQLite) so the index survives restarts; it is

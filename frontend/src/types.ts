@@ -401,6 +401,20 @@ export interface AIRiskReportResponse {
   report: string
 }
 
+/** AI counter: calls / tokens consumed (one month or one task). */
+export interface AICounter {
+  calls: number
+  tokens_in: number
+  tokens_out: number
+}
+
+/** GET /ai/usage — current calendar-month AI token usage + per-task breakdown. */
+export interface AIUsage {
+  month: string
+  total: AICounter
+  by_task: Record<string, AICounter>
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */

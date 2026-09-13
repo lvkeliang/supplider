@@ -17,6 +17,10 @@ type Service struct {
 	mu      sync.RWMutex
 	config  Config
 	adapter adapter
+	// usage reports token counts after each successful completion. Assigned
+	// once at construction via SetUsageSink; read under mu so a hot swap (a
+	// fresh Service) never races a Config() read on the old one.
+	usage UsageSink
 }
 
 // adapter is the internal completion surface both wire formats implement.
@@ -65,6 +69,26 @@ func (s *Service) CanEmbed() bool {
 	return s.config.Format != FormatAnthropic
 }
 
+// SetUsageSink attaches a token-usage recorder (nil disables). Call once
+// before the service is used — recording is best-effort and swallows errors.
+func (s *Service) SetUsageSink(sink UsageSink) {
+	s.mu.Lock()
+	s.usage = sink
+	s.mu.Unlock()
+}
+
+func (s *Service) reportUsage(ctx context.Context, task string, in, out int) {
+	if in == 0 && out == 0 {
+		return
+	}
+	s.mu.RLock()
+	u := s.usage
+	s.mu.RUnlock()
+	if u != nil {
+		u.Record(ctx, task, in, out)
+	}
+}
+
 // Config returns the redacted config (key masked) for display.
 func (s *Service) Config() Config {
 	s.mu.RLock()
@@ -79,7 +103,11 @@ func (s *Service) Complete(ctx context.Context, req ChatRequest) (ChatResponse, 
 	if a == nil {
 		return ChatResponse{}, ErrAIDisabled
 	}
-	return a.Complete(ctx, req)
+	resp, err := a.Complete(ctx, req)
+	if err == nil {
+		s.reportUsage(ctx, req.Task, resp.TokensIn, resp.TokensOut)
+	}
+	return resp, err
 }
 
 func (s *Service) Embed(ctx context.Context, texts []string) ([]EmbeddingItem, error) {

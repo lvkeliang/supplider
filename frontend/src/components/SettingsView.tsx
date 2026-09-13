@@ -9,6 +9,7 @@ import type {
   AIConfigResponse,
   AIPreset,
   AITestResult,
+  AIUsage,
   LocalPreference,
   RestoreStatus,
   VisibilityPolicyResponse,
@@ -161,6 +162,7 @@ function AIConfigCard() {
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<AITestResult | null>(null)
+  const [usage, setUsage] = useState<AIUsage | null>(null)
 
   useEffect(() => {
     api
@@ -173,6 +175,11 @@ function AIConfigCard() {
         setMaxTokens(r.config.max_tokens ? String(r.config.max_tokens) : '')
       })
       .catch(() => {}) // AI config is optional; card still renders
+    // 本月 AI 用量（0 也是有效答案）。
+    api
+      .aiUsage()
+      .then(setUsage)
+      .catch(() => {})
   }, [])
 
   const applyPreset = (p: AIPreset) => {
@@ -303,8 +310,45 @@ function AIConfigCard() {
             : `连接失败：${testResult.error ?? '未知错误'}`}
         </div>
       )}
+
+      {/* 本月 AI 用量（自配 Key 用户需关注 token 成本）。 */}
+      {configured && usage && (
+        <div className="mt-4 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">本月 AI 用量（{usage.month}）</span>
+            <span className="text-slate-400 dark:text-slate-500">
+              {formatNum(usage.total.calls)} 次调用 · {formatNum(usage.total.tokens_in)} in /{' '}
+              {formatNum(usage.total.tokens_out)} out
+            </span>
+          </div>
+          {Object.keys(usage.by_task).length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-slate-400 dark:text-slate-500">
+              {Object.entries(usage.by_task).map(([task, c]) => (
+                <span key={task}>
+                  {TASK_LABELS[task] ?? task}: {formatNum(c.tokens_in + c.tokens_out)}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </DocumentCard>
   )
+}
+
+const TASK_LABELS: Record<string, string> = {
+  ocr: 'OCR',
+  excel_map: 'Excel映射',
+  nl2filter: '自然语言搜索',
+  doc_extract: '文档解析',
+  summarize: '档案摘要',
+  risk_report: '风险报告',
+  compare: '比价',
+  ping: '连通测试',
+}
+
+function formatNum(n: number): string {
+  return n >= 10000 ? `${(n / 10000).toFixed(1)}万` : String(n)
 }
 
 /** Keyboard shortcut reference (TR-18). */

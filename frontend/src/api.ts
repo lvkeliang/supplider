@@ -12,6 +12,7 @@ import type {
   AICompareResponse,
   AISummaryResponse,
   AIRiskReportResponse,
+  AIUsage,
   DuplicateMatch,
   ExpiringReport,
   Features,
@@ -401,6 +402,8 @@ export const api = {
   // AI 空壳风险报告 (PRD 3.5): LLM risk assessment over the local rule signals.
   aiRiskReport: (id: string) =>
     request<AIRiskReportResponse>('POST', `/api/v1/ai/risk-report/${id}`),
+  // 本月 AI 用量统计（calls / tokens），从设置持久化读回。
+  aiUsage: () => request<AIUsage>('GET', '/api/v1/ai/usage'),
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

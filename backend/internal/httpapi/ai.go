@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/supplider/supplider/backend/internal/aigateway"
+	"github.com/supplider/supplider/backend/internal/usage"
 )
 
 // AI config endpoints (TR-19-A). The AI entry points across the UI are gated
@@ -81,7 +82,9 @@ func (s *Server) handleSaveAIConfig(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
-	s.setGateway(aigateway.New(cfg, s.aiClient))
+	gw := aigateway.New(cfg, s.aiClient)
+	gw.SetUsageSink(usage.New(s.Service))
+	s.setGateway(gw)
 
 	writeJSON(w, http.StatusOK, aiConfigResponse{
 		Configured: cfg.Valid(),
