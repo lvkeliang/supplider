@@ -21,6 +21,7 @@ import {
   type SupplierTypeChoice,
 } from '../supplierType'
 import { normalizeEstablishmentDate } from '../date'
+import { INDUSTRY_TEMPLATES } from '../industryTemplates'
 import type { OCRResult } from '../types'
 
 // 文档式录入:固定核心字段 + 可自由增删的自定义字段(不预定义字段名/类型)。
@@ -119,12 +120,35 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
   const toast = useToast()
   const editing = !!id
   const [form, setForm] = useState<FormState>(() => emptyForm(visibilityLevels))
+  const [templateSel, setTemplateSel] = useState('')
   const [loading, setLoading] = useState(editing)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [dupes, setDupes] = useState<DuplicateMatch[]>([])
   const [ocrBusy, setOcrBusy] = useState(false)
   const dupReq = useRef(0)
+
+  // 行业模板快捷填充 (PRD「行业模板扩展」): merge the template's categories
+  // into the current set, set the supplier-type category, and append its
+  // missing custom-field placeholders.
+  const applyTemplate = (id: string) => {
+    const t = INDUSTRY_TEMPLATES.find((x) => x.id === id)
+    setTemplateSel('')
+    if (!t) return
+    const existing = form.categoriesText.split(/[,，、\s]+/).map((s) => s.trim()).filter(Boolean)
+    const merged = Array.from(new Set([...existing, ...t.categories]))
+    const existingKeys = new Set(form.custom.map((r) => r.key))
+    const added: CustomRow[] = t.customFields
+      .filter((cf) => !existingKeys.has(cf.key))
+      .map((cf) => ({ key: cf.key, kind: cf.kind, value: '' }))
+    setForm((f) => ({
+      ...f,
+      categoriesText: merged.join(', '),
+      typeChoice: { category: t.supplierType, custom: '' },
+      custom: [...f.custom, ...added],
+    }))
+    toast.success(`已套用「${t.label}」行业模板`)
+  }
 
   useEffect(() => {
     if (!id) return
@@ -620,7 +644,21 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
 
       {/* 品类 */}
       <section id="form-sec-categories" className="form-section space-y-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">品类标签</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">品类标签</h2>
+          {/* 行业模板快捷填充：一键带入品类 + 供应商类型 + 自定义字段 */}
+          <select
+            className="input !w-auto !px-2 py-1 text-xs"
+            value={templateSel}
+            onChange={(e) => applyTemplate(e.target.value)}
+            title="按建筑行业子类一键填充常用品类、供应商类型与自定义字段"
+          >
+            <option value="">行业模板快速填充…</option>
+            {INDUSTRY_TEMPLATES.map((t) => (
+              <option key={t.id} value={t.id}>{t.label}</option>
+            ))}
+          </select>
+        </div>
         <input className="input" placeholder="多个品类用逗号分隔，如 施工服务, 市政工程"
           value={form.categoriesText} onChange={(e) => setForm((f) => ({ ...f, categoriesText: e.target.value }))} />
       </section>

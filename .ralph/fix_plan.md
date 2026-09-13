@@ -128,7 +128,7 @@
 - [ ] **AI 数据安全**：云端请求脱敏（`internal/redact` 掩码手机/邮箱/信用代码/长数字串，应用于档案摘要/比价/风险报告的档案画像；用户自己粘贴的需求文本不脱敏——其选择，已落地 2026-09-14）；"仅本地模型"模式、BYOC 部署模式、本地 Ollama GPU 节点调度（待办）
 - [ ] **Tauri 自动更新**：GitHub Releases / 自建更新源增量更新。**已预留**：TAURI_SIGNING_PRIVATE_KEY 后挂位
 - [ ] **钉钉/企业微信通讯录同步**
-- [ ] **行业模板扩展**：装饰/园林/市政/弱电行业预置供应商分类与字段模板
+- [x] **行业模板扩展**：市政/装饰/园林/弱电 + 建材物资 5 套预置模板（品类 + 供应商类型 + 自定义字段占位），表单「行业模板快速填充」下拉（合并品类去重、补供应商类型、补缺失自定义字段）；纯数据模块 `industryTemplates.ts` + vitest 校验——2026-09-14
 - [ ] **CI/CD 三产物流水线**：单仓提交 → `-tags personal/small-business/enterprise` 三目标编译 → Tauri 包 / Docker 镜像 / Helm Chart → GitHub Releases / Registry / Helm Repo。**已落地**：personal tag 的 CI/CD（ci.yml + release.yml）
 
 ## Completed
