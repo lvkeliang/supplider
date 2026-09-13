@@ -102,7 +102,7 @@
 - [ ] **AI Gateway 统一适配层**（个人版也需实现，见 TR-19-A）：双 Provider 适配器（已落地 TR-19-A）；token 用量统计与月度报告（`aigateway.UsageSink` + `usage.Tracker` 按 settings 持久化 + `GET /api/v1/ai/usage` + 设置页「本月 AI 用量」卡，已落地 2026-09-14）；相同请求缓存（`ResponseCache` 有界 TTL + 指纹，chat 按 task/model/base/JSON_mode/messages 键控、vision 跳过、命中不记账，已落地 2026-09-14）；模型路由（按任务类型）、主模型失败 fallback（待办）；无 Key 时整体降级。**已预留**：`ai_gateway` 接口骨架 + taskqueue（channel 内存队列）
 - [ ] **AI 辅助录入**：OCR（PaddleOCR/Tesseract）识别营业执照/资质证书 → LLM 抽取结构化字段自动填表；Excel 列名 AI 智能映射（feature flag 门控位已留）
 - [ ] **文档分析搜索**：上传 PDF/Word/Excel/图片 → OCR → LLM 提取需求要素 → bge-m3 embedding → Qdrant 内嵌向量相似搜索 + 关键词 + 地域/资质硬过滤 → 推荐列表 + 匹配理由 + 自动比价表
-- [ ] **自然语言搜索**："杭州本地能做市政工程的二级资质以上供应商" → LLM 转结构化 Filter
+- [x] **自然语言搜索**："杭州本地能做市政工程的二级资质以上供应商" → LLM 转结构化 Filter——HTTP `POST /ai/nl-search`（TR-19-D）+ MCP `nl_search_suppliers` tool 多端复用：抽出共享 `internal/nlsearch.Parse`（prompt+JSON 解析+资质校验+评分钳制），HTTP/MCP/CLI 三端零重复；无 Key → ErrAIDisabled 降级——2026-09-14
 - [x] **AI 比价与风险报告**：多报价方案对比摘要推荐（`POST /ai/compare` + CompareView「AI 对比分析」）；供应商档案一段话摘要（`POST /ai/summarize/{id}` + 详情页「AI 摘要」）；空壳风险评估报告（`POST /ai/risk-report/{id}` + 详情页「AI 风险报告」，分层于本地规则引擎信号+变更记录，AI 原生但可降级）——2026-09-14【PRD 3.5 AI 功能矩阵全部落地】
 - [x] **MCP Server**：CLI 命令映射为 MCP Tools；供应商数据映射为 Resources；预置 Prompt 模板；随包发布 Markdown Skill 文件（命令语法 + 典型用法）——2026-09-08
 - [ ] **Meilisearch 适配器（小企业版）**：个人版**不做**内嵌 Meilisearch（Rust 独立 server 二进制，破坏"单二进制零外部依赖"硬约束）；个人版搜索继续用 SQLite FTS5；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）实现同一 `search.Index` 接口，照 FTS5 测试对照

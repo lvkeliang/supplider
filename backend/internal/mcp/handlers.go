@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/supplider/supplider/backend/internal/aigateway"
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
 	"github.com/supplider/supplider/backend/internal/featureflag"
+	"github.com/supplider/supplider/backend/internal/nlsearch"
 	"github.com/supplider/supplider/backend/internal/supplier"
 )
 
@@ -38,6 +40,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	switch p.Name {
 	case "search_suppliers":
 		text, ferr = s.toolSearch(ctx, args)
+	case "nl_search_suppliers":
+		text, ferr = s.toolNLSearch(ctx, args)
 	case "get_supplier":
 		text, ferr = s.toolGet(ctx, args)
 	case "add_supplier":
@@ -122,6 +126,80 @@ func (s *Server) toolSearch(ctx context.Context, args json.RawMessage) (string, 
 		header += "（还有更多，可用 limit/分页继续）"
 	}
 	return header + "：\n" + pretty(out), nil
+}
+
+// toolNLSearch turns a natural-language query into a structured filter via the
+// AI gateway (the shared nlsearch.Parse) and lists matching suppliers. It needs
+// a configured AI provider (read from the persisted ai.config). AI 原生但可降级:
+// without a provider it returns a clear tool error so the host can fall back to
+// search_suppliers with the raw text.
+func (s *Server) toolNLSearch(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	decodeArgs(args, &a)
+	if strings.TrimSpace(a.Query) == "" {
+		return "", fmt.Errorf("query 不能为空")
+	}
+	if a.Limit <= 0 {
+		a.Limit = 20
+	}
+	if a.Limit > 100 {
+		a.Limit = 100
+	}
+
+	cfg, err := s.aiGatewayConfig(ctx)
+	if err != nil {
+		return "", err
+	}
+	gw := aigateway.New(cfg, nil)
+	f, err := nlsearch.Parse(ctx, gw, a.Query)
+	if err != nil {
+		return "", err
+	}
+
+	// Map the parsed structure onto the shared structured filter.
+	filter := datamodel.SupplierFilter{
+		Keyword:   f.Keyword,
+		Province:  f.Province,
+		City:      f.City,
+		District:  f.District,
+		MinRating: f.MinRating,
+	}
+	if f.Category != "" {
+		filter.Categories = []string{f.Category}
+	}
+	if f.MinQualLevel != "" {
+		filter.MinQualRank = domain.QualRank(f.MinQualLevel)
+	}
+
+	page, err := s.svc.List(ctx, datamodel.Query{Filter: filter, Limit: a.Limit})
+	if err != nil {
+		return "", err
+	}
+	out := map[string]any{
+		"count": len(page.Items),
+		"items": page.Items,
+	}
+	header := fmt.Sprintf("自然语言解析「%s」→ 筛选，找到 %d 家供应商", strings.TrimSpace(a.Query), len(page.Items))
+	return header + "：\n" + pretty(out), nil
+}
+
+// aiGatewayConfig reads and validates the persisted AI provider config.
+func (s *Server) aiGatewayConfig(ctx context.Context) (aigateway.Config, error) {
+	raw, err := s.svc.GetSetting(ctx, aigateway.SettingKey)
+	if err != nil {
+		return aigateway.Config{}, fmt.Errorf("AI 模型未配置（请在桌面端设置中配置）：%v", err)
+	}
+	cfg, err := aigateway.DecodeConfig(raw)
+	if err != nil {
+		return aigateway.Config{}, fmt.Errorf("读取 AI 配置失败：%v", err)
+	}
+	if !cfg.Valid() {
+		return aigateway.Config{}, fmt.Errorf("AI 模型未配置（请在桌面端设置中配置）")
+	}
+	return cfg, nil
 }
 
 func (s *Server) toolGet(ctx context.Context, args json.RawMessage) (string, error) {

@@ -69,6 +69,14 @@ func toolDefs() []map[string]any {
 			}),
 		},
 		{
+			"name":        "nl_search_suppliers",
+			"description": "用一句自然语言搜索供应商（AI 解析成结构化筛选）：如 \"杭州本地能做市政工程的二级资质以上供应商\"。需在桌面端设置中配置 AI 模型。无 AI 时返回明确错误，可退回 search_suppliers + 关键词。返回摘要列表。",
+			"inputSchema": schema(map[string]any{
+				"query": strProp("自然语言需求，如「杭州本地能做市政工程的二级资质以上供应商」"),
+				"limit": map[string]any{"type": "integer", "description": "每页条数，默认 20，最大 100"},
+			}, "query"),
+		},
+		{
 			"name":        "get_supplier",
 			"description": "按 id 读取供应商完整档案（文档式：基本信息/资质/品类/产品服务/绩效/风险标记/自定义字段/附件/变更记录）。",
 			"inputSchema": schema(map[string]any{
