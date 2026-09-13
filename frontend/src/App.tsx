@@ -269,7 +269,9 @@ export default function App() {
             aiOCR={features?.ai_ocr_entry ?? false}
           />
         )}
-        {view.name === 'detail' && <SupplierDetail id={view.id} go={go} />}
+        {view.name === 'detail' && (
+          <SupplierDetail id={view.id} go={go} aiEnabled={features?.ai_enabled ?? false} />
+        )}
         {view.name === 'edit' && (
           <SupplierForm
             go={go}

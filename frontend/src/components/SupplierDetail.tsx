@@ -35,7 +35,7 @@ function SignalRow({ sig }: { sig: RiskSignal }) {
  * card. Fixed core fields render in labeled rows; free-form custom_fields
  * render generically (no schema assumed). Archived documents offer restore.
  */
-export function SupplierDetail({ id, go }: { id: string; go: Go }) {
+export function SupplierDetail({ id, go, aiEnabled = false }: { id: string; go: Go; aiEnabled?: boolean }) {
   const toast = useToast()
   const [doc, setDoc] = useState<Supplier | null>(null)
   const [risk, setRisk] = useState<RiskReport | null>(null)
@@ -43,6 +43,8 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [reviewing, setReviewing] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiSummary, setAiSummary] = useState<string | null>(null)
   // 合并重复档案选择器：从查重结果里直接挑选要并入的档案（手输 id 仅作兜底）。
   const [mergeOpen, setMergeOpen] = useState(false)
   const [mergeCandidates, setMergeCandidates] = useState<DuplicateMatch[] | null>(null)
@@ -125,6 +127,21 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
+    }
+  }
+
+  // AI 档案摘要 (PRD 3.5): a third-party-view one-paragraph summary of the
+  // archive. Chat-only → gated on ai_enabled (not ai_doc_search).
+  const summarize = async () => {
+    setAiBusy(true)
+    setError('')
+    try {
+      const r = await api.aiSummarize(id)
+      setAiSummary(r.summary)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiBusy(false)
     }
   }
 
@@ -318,6 +335,11 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
           </div>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
+          {aiEnabled && (
+            <button className="btn-ghost" disabled={aiBusy} onClick={summarize} title="AI 一句话概括该档案的定位/资质/信誉/风险">
+              <Icon name="info" size={15} /> {aiBusy ? '生成中…' : 'AI 摘要'}
+            </button>
+          )}
           {/* 关注在归档/在库状态下都可用（归档后仍保留关注与通知历史）。 */}
           <button
             className={doc.watched ? 'btn-primary' : 'btn-ghost'}
@@ -494,6 +516,14 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
       {doc.vis_exception && !doc.vis_enforcement?.pending_adjustment && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
           <Icon name="check" size={15} strokeWidth={3} /> 申诉成立：该供应商的可见范围已获管理员例外批准。再次修改可见范围后需重新申请。
+        </div>
+      )}
+
+      {/* AI 档案摘要 (PRD 3.5): renders after the user clicks in the op bar. */}
+      {aiSummary && (
+        <div className="rounded-lg border border-brand-200 dark:border-brand-900 bg-brand-50 dark:bg-brand-900/30 px-4 py-3">
+          <div className="text-sm font-medium text-brand-800 dark:text-brand-300">AI 档案摘要</div>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{aiSummary}</p>
         </div>
       )}
 

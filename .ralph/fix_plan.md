@@ -102,7 +102,7 @@
 - [ ] **AI 辅助录入**：OCR（PaddleOCR/Tesseract）识别营业执照/资质证书 → LLM 抽取结构化字段自动填表；Excel 列名 AI 智能映射（feature flag 门控位已留）
 - [ ] **文档分析搜索**：上传 PDF/Word/Excel/图片 → OCR → LLM 提取需求要素 → bge-m3 embedding → Qdrant 内嵌向量相似搜索 + 关键词 + 地域/资质硬过滤 → 推荐列表 + 匹配理由 + 自动比价表
 - [ ] **自然语言搜索**："杭州本地能做市政工程的二级资质以上供应商" → LLM 转结构化 Filter
-- [ ] **AI 比价与风险报告**：多报价方案对比摘要推荐（`POST /ai/compare` + CompareView「AI 对比分析」按钮，chat-only 按 ai_enabled 门控，已落地 2026-09-14）；工商变更记录 → 空壳风险评估报告；供应商档案一段话摘要（待办）
+- [ ] **AI 比价与风险报告**：多报价方案对比摘要推荐（`POST /ai/compare` + CompareView「AI 对比分析」，已落地 2026-09-14）；供应商档案一段话摘要（`POST /ai/summarize/{id}` + 详情页「AI 摘要」，已落地 2026-09-14）；空壳风险评估报告（待办）
 - [x] **MCP Server**：CLI 命令映射为 MCP Tools；供应商数据映射为 Resources；预置 Prompt 模板；随包发布 Markdown Skill 文件（命令语法 + 典型用法）——2026-09-08
 - [ ] **Meilisearch 适配器（小企业版）**：个人版**不做**内嵌 Meilisearch（Rust 独立 server 二进制，破坏"单二进制零外部依赖"硬约束）；个人版搜索继续用 SQLite FTS5；Meilisearch 适配器应在小企业版（Docker Compose 独立容器）实现同一 `search.Index` 接口，照 FTS5 测试对照
 - [ ] **MongoDB 存储适配器**（`//go:build enterprise` / small-business）：BSON 文档操作、复合索引（可见性+品类+地域）；与 SQLite 适配器跑同一 contract test 套件

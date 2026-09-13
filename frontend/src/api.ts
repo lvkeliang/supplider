@@ -10,6 +10,7 @@ import type {
   DocSearchResponse,
   SemanticIndexResult,
   AICompareResponse,
+  AISummaryResponse,
   DuplicateMatch,
   ExpiringReport,
   Features,
@@ -393,6 +394,9 @@ export const api = {
   // AI 比价摘要 (PRD 3.5): summarize a multi-supplier comparison + recommend.
   aiCompare: (ids: string[]) =>
     request<AICompareResponse>('POST', '/api/v1/ai/compare', { ids }),
+  // AI 档案摘要 (PRD 3.5): one-paragraph summary of a supplier archive.
+  aiSummarize: (id: string) =>
+    request<AISummaryResponse>('POST', `/api/v1/ai/summarize/${id}`),
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

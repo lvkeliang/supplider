@@ -391,6 +391,11 @@ export interface AICompareResponse {
   summary: string
 }
 
+/** AI 档案摘要 (PRD 3.5): one-paragraph third-party-view summary of an archive. */
+export interface AISummaryResponse {
+  summary: string
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */
