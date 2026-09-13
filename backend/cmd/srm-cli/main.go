@@ -22,6 +22,7 @@
 //	srm-cli risk [id] [--json]               空壳特征检测：无 id 列审核队列，带 id 看该供应商信号
 //	srm-cli review <id> [--dismiss] [--by user] [--note ...]
 //	                                         人工审核闭环：标记已核验(默认)或误报忽略，清出审核队列
+//	srm-cli audit [--limit N] [--json]      操作审计日志：跨供应商生命周期轨迹的最新条目
 //	srm-cli blacklist <id> [--reason ...] / srm-cli unblacklist <id>
 //	                                         黑名单（淘汰/禁用）：列入仍可搜到但醒目标记，移出恢复在库
 //	srm-cli visibility [policy] [--enforce] [--max-level N] [--buffer-days N] [--json]
@@ -74,6 +75,9 @@ func main() {
 	case "ainl", "nlsearch":
 		// AI 自然语言搜索：整句需求 → 结构化筛选 → 列表。
 		err = cmdNLSearch(args)
+	case "audit":
+		// 操作审计日志：跨供应商生命周期轨迹（创建/修改/归档/黑名单/合并/导出）。
+		err = cmdAudit(args)
 	case "analyze":
 		// AI 文档分析搜索 (PRD: srm-cli analyze ./需求.docx): upload a
 		// requirement document, LLM extracts the requirement and the semantic
@@ -397,6 +401,73 @@ type nlFilter struct {
 // the sidecar's /ai/nl-search (shared nlsearch.Parse) and lists matching
 // suppliers. Requires the sidecar running with an AI provider configured;
 // without one the endpoint returns a clear error.
+// auditActionLabel is the Chinese short label for one audit action.
+var auditActionLabel = map[string]string{
+	"create": "创建", "update": "修改", "archive": "归档", "restore": "恢复",
+	"blacklist": "加入黑名单", "unblacklist": "移出黑名单", "merge": "合并",
+	"import": "批量导入", "export": "导出", "visibility": "可见性变更",
+}
+
+// cmdAudit lists the recent cross-supplier lifecycle trail (GET /api/v1/audit).
+func cmdAudit(args []string) error {
+	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
+	limit := fs.Int("limit", 30, "max entries")
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+
+	resp, err := http.Get(apiBase() + "/api/v1/audit?limit=" + fmt.Sprint(*limit))
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+
+	var out struct {
+		Count int `json:"count"`
+		Items []struct {
+			Time     string `json:"time"`
+			Action   string `json:"action"`
+			TargetID string `json:"target_id"`
+			Name     string `json:"name"`
+			Actor    string `json:"actor"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	if len(out.Items) == 0 {
+		fmt.Println("(no audit entries yet)")
+		return nil
+	}
+	fmt.Printf("最近 %d 条操作日志：\n", len(out.Items))
+	for _, e := range out.Items {
+		label := auditActionLabel[e.Action]
+		if label == "" {
+			label = e.Action
+		}
+		name := e.Name
+		if name == "" {
+			name = e.TargetID
+		}
+		t := e.Time
+		if tt, err := time.Parse(time.RFC3339, e.Time); err == nil {
+			t = tt.Local().Format("01-02 15:04")
+		}
+		fmt.Printf("  %-14s  %-10s  %s\n", t, label, name)
+	}
+	return nil
+}
+
 func cmdNLSearch(args []string) error {
 	fs := flag.NewFlagSet("ainl", flag.ContinueOnError)
 	limit := fs.Int("limit", 20, "page size (max 100)")

@@ -104,3 +104,35 @@ func TestCmdNLSearchUsageError(t *testing.T) {
 		t.Fatalf("no-arg call must return usage error, got %v", err)
 	}
 }
+
+// TestCmdAuditLists: a fake sidecar serves /api/v1/audit; the CLI prints the
+// trail including the Chinese action label and supplier name.
+func TestCmdAuditLists(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/audit" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"count":1,"items":[{"time":"2026-09-14T02:00:00Z","action":"blacklist","target_id":"sup_1","name":"甲公司","actor":"local"}]}`))
+	}))
+	defer srv.Close()
+	orig := os.Getenv("SRM_API_ADDR")
+	_ = os.Setenv("SRM_API_ADDR", srv.URL)
+	defer os.Setenv("SRM_API_ADDR", orig)
+
+	old := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	err := cmdAudit([]string{})
+	_ = pw.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "加入黑名单") || !strings.Contains(buf.String(), "甲公司") {
+		t.Fatalf("audit output missing action/name:\n%s", buf.String())
+	}
+}
