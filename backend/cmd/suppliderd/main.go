@@ -27,6 +27,7 @@ import (
 	"github.com/supplider/supplider/backend/internal/storefactory"
 	"github.com/supplider/supplider/backend/internal/supplier"
 	"github.com/supplider/supplider/backend/internal/tier"
+	"github.com/supplider/supplider/backend/internal/vectorstore/memory"
 	"github.com/supplider/supplider/backend/internal/webui"
 )
 
@@ -85,12 +86,18 @@ func main() {
 	aiCfg, _ := aigateway.DecodeConfig(rawAI)
 	gateway := aigateway.New(aiCfg, nil)
 
+	// Semantic search (TR-19-E) vector index. Personal tier uses the in-memory
+	// reference store (persistent SQLite vector table is a later slice); it is
+	// primed on demand via POST /ai/index.
+	vectorIndex := memory.New()
+
 	feats := featureflag.Default().WithAIState(gateway.Enabled())
 
 	// Single binary serves API + embedded UI. CORS lets the Tauri webview
 	// (tauri://localhost / tauri.localhost) call the loopback sidecar.
 	apiServer := httpapi.New(svc, feats).
 		WithGateway(gateway).
+		WithVectorStore(vectorIndex).
 		WithObjects(objects).
 		WithBackup(backupWriter(store, objects)).
 		WithRestore(restoreFuncs(*dataDir)).

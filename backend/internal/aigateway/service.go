@@ -47,6 +47,24 @@ func (s *Service) Enabled() bool {
 	return s.adapter != nil
 }
 
+// CanEmbed reports whether the configured provider can compute vectors for
+// semantic search (TR-19-E). It is stricter than Enabled(): an embedding
+// model must be set AND the provider must expose an /embeddings endpoint
+// (OpenAI-format only — the Anthropic Messages API has no embeddings route).
+// A configured-but-offline provider still reports true; the call itself
+// surfaces the connectivity error.
+func (s *Service) CanEmbed() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.adapter == nil {
+		return false
+	}
+	if s.config.EmbeddingModel == "" {
+		return false
+	}
+	return s.config.Format != FormatAnthropic
+}
+
 // Config returns the redacted config (key masked) for display.
 func (s *Service) Config() Config {
 	s.mu.RLock()

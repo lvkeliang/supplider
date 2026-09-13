@@ -67,6 +67,7 @@ import (
 	"github.com/supplider/supplider/backend/internal/importer"
 	"github.com/supplider/supplider/backend/internal/objectstore"
 	"github.com/supplider/supplider/backend/internal/supplier"
+	"github.com/supplider/supplider/backend/internal/vectorstore"
 )
 
 // Server bundles HTTP dependencies.
@@ -82,6 +83,10 @@ type Server struct {
 	// Objects is the attachment store; nil disables attachment upload/
 	// download (handlers answer 501). Wired via WithObjects.
 	Objects objectstore.Store
+	// VectorStore is the semantic-search vector index (TR-19-E); nil
+	// disables POST /ai/index and /ai/semantic-search (503). Wired via
+	// WithVectorStore.
+	VectorStore vectorstore.Store
 	// Backup streams a full library archive (zip: database snapshot +
 	// attachments); nil disables GET /api/v1/backup (501) — e.g. the
 	// in-memory dev build has nothing on disk to back up.
@@ -160,6 +165,13 @@ func (s *Server) WithObjects(store objectstore.Store) *Server {
 	return s
 }
 
+// WithVectorStore attaches the semantic-search vector index and returns the
+// server for chaining. Pass nil to leave semantic search disabled.
+func (s *Server) WithVectorStore(vs vectorstore.Store) *Server {
+	s.VectorStore = vs
+	return s
+}
+
 // WithBackup wires the full-library backup archive writer (zip) and
 // returns the server for chaining. Pass nil to disable GET /api/v1/backup
 // (the endpoint answers 501).
@@ -186,6 +198,8 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/ai/ocr", s.handleOCR)
 	s.Mux.HandleFunc("POST /api/v1/ai/excel-map", s.handleAIExcelMap)
 	s.Mux.HandleFunc("POST /api/v1/ai/nl-search", s.handleAINLSearch)
+	s.Mux.HandleFunc("POST /api/v1/ai/semantic-search", s.handleSemanticSearch)
+	s.Mux.HandleFunc("POST /api/v1/ai/index", s.handleSemanticIndex)
 	s.Mux.HandleFunc("POST /api/v1/suppliers", s.handleCreate)
 	s.Mux.HandleFunc("GET /api/v1/suppliers", s.handleList)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/duplicates", s.handleDuplicates)
