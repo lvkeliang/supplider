@@ -53,6 +53,9 @@ func (s *Store) Clear(_ context.Context) error {
 	return nil
 }
 
+// Close is a no-op for the in-memory store.
+func (s *Store) Close() error { return nil }
+
 // Search ranks every stored vector by cosine similarity to the query and
 // returns the topK. Dimension mismatches are skipped (a stored vector whose
 // length differs from the query is simply not comparable).

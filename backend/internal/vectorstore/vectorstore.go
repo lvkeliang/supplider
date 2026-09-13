@@ -38,6 +38,9 @@ type Store interface {
 	Clear(ctx context.Context) error
 	// Len reports how many vectors are stored.
 	Len() int
+	// Close releases underlying connections/files (no-op for the in-memory
+	// reference store).
+	Close() error
 }
 
 // Cosine returns the cosine similarity of two equal-length vectors, in

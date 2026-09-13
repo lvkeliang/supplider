@@ -27,7 +27,7 @@ import (
 	"github.com/supplider/supplider/backend/internal/storefactory"
 	"github.com/supplider/supplider/backend/internal/supplier"
 	"github.com/supplider/supplider/backend/internal/tier"
-	"github.com/supplider/supplider/backend/internal/vectorstore/memory"
+	"github.com/supplider/supplider/backend/internal/vectorfactory"
 	"github.com/supplider/supplider/backend/internal/webui"
 )
 
@@ -86,10 +86,14 @@ func main() {
 	aiCfg, _ := aigateway.DecodeConfig(rawAI)
 	gateway := aigateway.New(aiCfg, nil)
 
-	// Semantic search (TR-19-E) vector index. Personal tier uses the in-memory
-	// reference store (persistent SQLite vector table is a later slice); it is
-	// primed on demand via POST /ai/index.
-	vectorIndex := memory.New()
+	// Semantic search (TR-19-E) vector index. Personal tier persists it to
+	// <DataDir>/vectors.db (SQLite) so the index survives restarts; it is
+	// primed/refreshed via POST /ai/index.
+	vectorIndex, err := vectorfactory.Open(vectorfactory.Config{DataDir: *dataDir})
+	if err != nil {
+		log.Fatalf("open vector store: %v", err)
+	}
+	defer vectorIndex.Close()
 
 	feats := featureflag.Default().WithAIState(gateway.Enabled(), gateway.CanEmbed())
 
