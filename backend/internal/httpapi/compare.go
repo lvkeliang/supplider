@@ -10,6 +10,7 @@ import (
 	"github.com/supplider/supplider/backend/internal/aigateway"
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
+	"github.com/supplider/supplider/backend/internal/redact"
 )
 
 // AI 比价摘要 (PRD 3.5「比价：多报价方案对比摘要与推荐」): the user has
@@ -123,7 +124,8 @@ func (s *Server) buildCompareProfile(ctx context.Context, ids []string) (string,
 			fmt.Fprintf(&b, "   风险提示：%s\n", risks)
 		}
 	}
-	return b.String(), nil
+	// AI 云端请求脱敏: scrub contact PII before the archive leaves for the LLM.
+	return redact.Text(b.String()), nil
 }
 
 func qualSummary(d *domain.Supplier) string {

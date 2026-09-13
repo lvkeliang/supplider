@@ -9,6 +9,7 @@ import (
 	"github.com/supplider/supplider/backend/internal/aigateway"
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
+	"github.com/supplider/supplider/backend/internal/redact"
 )
 
 // AI 档案摘要 (PRD 3.5「维护：供应商档案一段话摘要」): turn a supplier's
@@ -110,5 +111,7 @@ func summarizeProfile(d *domain.Supplier) string {
 	if d.RiskFlags.ShellRisk {
 		b.WriteString("风险提示：空壳风险\n")
 	}
-	return b.String()
+	// AI 云端请求脱敏: scrub contact PII (phone/email/信用代码) before the
+	// archive leaves the machine for a cloud LLM.
+	return redact.Text(b.String())
 }

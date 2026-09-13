@@ -11,6 +11,7 @@ import (
 	"github.com/supplider/supplider/backend/internal/aigateway"
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
+	"github.com/supplider/supplider/backend/internal/redact"
 	"github.com/supplider/supplider/backend/internal/risk"
 )
 
@@ -126,5 +127,7 @@ func riskReportProfile(d *domain.Supplier) string {
 			b.WriteString(fmt.Sprintf("- %s: %v → %v（%s）\n", c.Field, c.Old, c.New, c.Date.Format("2006-01")))
 		}
 	}
-	return b.String()
+	// AI 云端请求脱敏: scrub contact PII (phone/email/信用代码) before the
+	// archive leaves for the LLM.
+	return redact.Text(b.String())
 }
