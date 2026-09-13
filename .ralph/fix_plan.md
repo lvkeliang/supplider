@@ -222,6 +222,7 @@
 9. **可选 JSON 体被吞解码错误**：`_ = Decode(...)` 吞掉解码错误，Go 在类型报错前已为零值分配指针→畸形请求静默落库最严等级。统一用 `decodeOptionalJSONBody`（空体容错，有体但畸形一律 400）。
 10. **tauri-build 2 的 build.rs 无条件拷贝 externalBin**：`copy_binaries` 对 `bundle.externalBin` 无条件执行，按当前 TARGET 拼 `binaries/suppliderd-<triple>`，缺失即 exit(1)。cargo check 同样跑 build.rs。check 前必须先 build-frontend（generate_context 嵌入 dist）+ build-sidecar。
 11. **tauri 2 blocking_recv API 漂移**：tauri 2.11.5 的 `async_runtime::Receiver` 重导出 `tokio::sync::mpsc::Receiver`，`blocking_recv(&mut self) -> Option<T>`（不再是 `Result<Option<T>>`）。必须 `while let Some(event) = rx.blocking_recv()`。
+12. **AI 请求体要留 context 余量**：doc-extract 粘贴/上传的整份需求文档可能远超 LLM context——字节级 10MB 输入上限 ≠ 模型 context 窗口。发送前 `clipDocText` 按 runes 裁到 30k 字符边界（不产生非法 UTF-8）；关键需求要素通常在文首，截断影响小。其他 profile（摘要/比价/风险报告）由档案派生、本身有界，无需裁。
 
 ### 架构红线自查
 

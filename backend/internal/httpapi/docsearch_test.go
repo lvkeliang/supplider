@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/supplider/supplider/backend/internal/aigateway"
 	vsmem "github.com/supplider/supplider/backend/internal/vectorstore/memory"
@@ -80,6 +82,32 @@ func TestDocSearchUnconfiguredReturns503(t *testing.T) {
 	w := do(t, s, http.MethodPost, "/api/v1/ai/doc-search", `{"text":"需要市政工程供应商"}`)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503 (body=%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestClipDocTextBoundedAndUTF8Safe(t *testing.T) {
+	// Short text passes through unchanged.
+	if got := clipDocText("需要杭州市政工程供应商"); got != "需要杭州市政工程供应商" {
+		t.Fatalf("short text altered: %q", got)
+	}
+	// A long run (> max bytes and > max runes) is clipped to the rune budget,
+	// still valid UTF-8.
+	long := strings.Repeat("混凝土C30", 20000) // 40k runes / 100k+ bytes
+	got := clipDocText(long)
+	if got == long {
+		t.Fatal("long text must be clipped")
+	}
+	if r := utf8.RuneCountInString(got); r != maxDocInputChars {
+		t.Fatalf("clipped rune count = %d, want %d", r, maxDocInputChars)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("clipped text must be valid UTF-8")
+	}
+	// A big Chinese doc whose rune count is within budget is left intact
+	// (bytes exceed the byte heuristic but runes don't).
+	chinese := strings.Repeat("混凝土", 9000) // 27k runes, 81k bytes
+	if got := clipDocText(chinese); got != chinese {
+		t.Fatal("in-budget rune count must not be clipped")
 	}
 }
 

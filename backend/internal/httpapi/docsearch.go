@@ -108,9 +108,13 @@ func (s *Server) handleDocSearch(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "需求文档为空")
 			return
 		}
+		// A pasted doc can far exceed any LLM context window — clip to a generous
+		// head (the key requirement elements usually lead) so the call never
+		// blows up on an oversized paste.
+		text := clipDocText(in.text)
 		msgs = []aigateway.ChatMessage{
 			{Role: "system", Content: docExtractPrompt},
-			{Role: "user", Content: in.text},
+			{Role: "user", Content: text},
 		}
 	}
 
@@ -197,6 +201,26 @@ func (s *Server) handleDocSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, docSearchResponse{Requirement: req, Results: results})
+}
+
+// maxDocInputChars bounds the requirement text sent to the LLM. A brief/清理
+// document is usually a few KB; 30k chars covers real briefs while staying well
+// inside any model context window.
+const maxDocInputChars = 30000
+
+// clipDocText truncates a document to maxDocInputChars runes at a UTF-8-safe
+// boundary (the key requirement elements conventionally lead the document).
+func clipDocText(s string) string {
+	if len(s) <= maxDocInputChars {
+		return s
+	}
+	// Walk runes, keep a packing margin so a trailing multi-byte rune never
+	// produces invalid UTF-8.
+	runes := []rune(s)
+	if len(runes) > maxDocInputChars {
+		return string(runes[:maxDocInputChars])
+	}
+	return s
 }
 
 // docSearchInput is the result of reading one doc-search request: either
