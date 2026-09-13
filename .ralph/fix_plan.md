@@ -81,7 +81,7 @@
 - [x] **TR-19-B OCR 辅助录入**：前端"图片录入"按钮；后端 `POST /api/v1/ai/ocr` 上传图片 → 调用 `Gateway.Complete()` 带视觉提示词 → 解析 JSON 结果预填表单。**阶段 2，2-3 天**——2026-09-12（后端 gateway 多模态 + /ai/ocr 端点）、2026-09-12（前端「图片录入」按钮预填表单）
 - [x] **TR-19-C Excel 智能列映射**：`ImportView.tsx` 预览阶段增加"AI 建议映射"按钮；后端 `POST /api/v1/ai/excel-map` 发送表头+示例值 → AI 返回映射建议 JSON。**阶段 3，1-2 天**——2026-09-12（后端 /ai/excel-map 端点）、2026-09-12（前端「AI 建议映射」按钮）
 - [x] **TR-19-D 自然语言搜索**：搜索框旁增加"AI 搜索"模式切换；后端 `POST /api/v1/ai/nl-search` 转自然语言为结构化筛选参数。**阶段 4，2-3 天**——2026-09-12（后端 /ai/nl-search 端点）、2026-09-12（前端「AI 搜索」切换）
-- [~] **TR-19-E 文档分析搜索 + 语义搜索**：文档上传+向量化存储；`Gateway.Embed()` 实现（bge-m3 模型）；文档分析推荐供应商。**阶段 5，5-7 天**——Gateway.Embed() OpenAI /embeddings + `vectorstore` 端口（Cosine/Clear）+ memory 参考实现 + `POST /ai/index`（重建索引）+ `POST /ai/semantic-search` 已落地 2026-09-13，待持久化 SQLite 向量表 + 文档上传 + 前端
+- [~] **TR-19-E 文档分析搜索 + 语义搜索**：文档上传+向量化存储；`Gateway.Embed()` 实现（bge-m3 模型）；文档分析推荐供应商。**阶段 5，5-7 天**——Gateway.Embed() OpenAI /embeddings + `vectorstore` 端口（Cosine/Clear）+ memory 参考实现 + `POST /ai/index`（重建索引）+ `POST /ai/semantic-search` + `POST /ai/doc-search`（文本上传/粘贴 → LLM 提取需求 → 语义匹配 + 地域/品类/资质硬过滤 + 匹配理由）已落地 2026-09-13，待持久化 SQLite 向量表 + PDF/Office/图片文档解析 + 前端
 - [x] **TR-19 备注（小打磨，随相关改动顺手做）**：~~`compact()` 0 值问题（已修，见 P2 顶部 2026-09-10）~~；~~设置页本地偏好保存成功消息应 3-5 秒自动消失~~；~~合并重复按钮可改为"合并重复档案…"带省略号风格~~——2026-09-13
 
 ## Medium Priority — 小企业版（验证期）

@@ -200,6 +200,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/ai/nl-search", s.handleAINLSearch)
 	s.Mux.HandleFunc("POST /api/v1/ai/semantic-search", s.handleSemanticSearch)
 	s.Mux.HandleFunc("POST /api/v1/ai/index", s.handleSemanticIndex)
+	s.Mux.HandleFunc("POST /api/v1/ai/doc-search", s.handleDocSearch)
 	s.Mux.HandleFunc("POST /api/v1/suppliers", s.handleCreate)
 	s.Mux.HandleFunc("GET /api/v1/suppliers", s.handleList)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/duplicates", s.handleDuplicates)
