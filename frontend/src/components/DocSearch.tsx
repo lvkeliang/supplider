@@ -108,7 +108,7 @@ export function DocSearch({ go }: { go: Go }) {
           <input
             ref={fileRef}
             type="file"
-            accept=".txt,.md,.csv,text/plain,text/markdown,text/csv"
+            accept=".txt,.md,.csv,.docx,.xlsx,.png,.jpg,.jpeg,.webp,text/plain,text/markdown,text/csv,image/png,image/jpeg,image/webp"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0]
@@ -117,7 +117,7 @@ export function DocSearch({ go }: { go: Go }) {
             }}
           />
           <span className="text-xs text-slate-400">
-            支持纯文本（.txt/.md/.csv）；PDF/Word/Excel/图片请先粘贴文本。首次使用请先「重建索引」。
+            支持纯文本 / Word(.docx) / Excel(.xlsx) / 图片；PDF 请先粘贴文本。首次使用请先「重建索引」。
           </span>
         </div>
       </div>

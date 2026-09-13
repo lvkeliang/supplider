@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/supplider/supplider/backend/internal/aigateway"
 	"github.com/supplider/supplider/backend/internal/datamodel"
+	"github.com/supplider/supplider/backend/internal/documentextract"
 	"github.com/supplider/supplider/backend/internal/domain"
 )
 
@@ -64,8 +65,9 @@ const docExtractPrompt = `你是供应商需求分析助手。从用户上传的
 - category: 最核心的一个品类关键词（如 "市政工程"/"商砼"/"脚手架"）
 - min_qual_level: 最低资质等级，只能是 特级/一级/二级/三级/甲级/乙级/丙级 之一，没有则 ""`
 
-// handleDocSearch runs the document-analysis pipeline: extract text → LLM
-// requirement extraction → embed → semantic match → hard-filter → reason.
+// handleDocSearch runs the document-analysis pipeline: extract text (or read a
+// document image via vision) → LLM requirement extraction → embed → semantic
+// match → hard-filter → reason.
 func (s *Server) handleDocSearch(w http.ResponseWriter, r *http.Request) {
 	srch, status, msg := s.semanticSearcher()
 	if srch == nil {
@@ -76,14 +78,11 @@ func (s *Server) handleDocSearch(w http.ResponseWriter, r *http.Request) {
 	// gateway serves the LLM extraction call below.
 	gw := s.liveGateway()
 
-	text, topK, ok := readRequirementText(w, r)
+	in, ok := readDocSearchInput(w, r)
 	if !ok {
 		return
 	}
-	if strings.TrimSpace(text) == "" {
-		writeError(w, http.StatusBadRequest, "需求文档为空")
-		return
-	}
+	topK := in.topK
 	if topK <= 0 {
 		topK = 10
 	}
@@ -91,12 +90,33 @@ func (s *Server) handleDocSearch(w http.ResponseWriter, r *http.Request) {
 		topK = 100
 	}
 
-	resp, err := gw.Complete(r.Context(), aigateway.ChatRequest{
-		Task: "doc_extract",
-		Messages: []aigateway.ChatMessage{
+	// Build the extraction request: a document image goes straight to the
+	// vision model (no local text); text/docx/xlsx are sent as prose.
+	var msgs []aigateway.ChatMessage
+	if in.image != nil {
+		if strings.TrimSpace(in.imageMIME) == "" {
+			in.imageMIME = "image/png"
+		}
+		msgs = []aigateway.ChatMessage{{
+			Role:        "user",
+			Content:     docExtractPrompt,
+			ImageBase64: base64.StdEncoding.EncodeToString(in.image),
+			ImageMIME:   in.imageMIME,
+		}}
+	} else {
+		if strings.TrimSpace(in.text) == "" {
+			writeError(w, http.StatusBadRequest, "需求文档为空")
+			return
+		}
+		msgs = []aigateway.ChatMessage{
 			{Role: "system", Content: docExtractPrompt},
-			{Role: "user", Content: text},
-		},
+			{Role: "user", Content: in.text},
+		}
+	}
+
+	resp, err := gw.Complete(r.Context(), aigateway.ChatRequest{
+		Task:     "doc_extract",
+		Messages: msgs,
 		JSONMode: true,
 	})
 	if err != nil {
@@ -179,44 +199,67 @@ func (s *Server) handleDocSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, docSearchResponse{Requirement: req, Results: results})
 }
 
-// readRequirementText returns the requirement text and top_k from either a
-// multipart text file or a JSON {text, top_k} body. It writes the error
-// response itself and returns ok=false on failure.
-func readRequirementText(w http.ResponseWriter, r *http.Request) (text string, topK int, ok bool) {
+// docSearchInput is the result of reading one doc-search request: either
+// extracted text (plain/docx/xlsx) or a raw document image routed to vision.
+type docSearchInput struct {
+	text      string
+	topK      int
+	image     []byte // non-nil → vision mode (LLM reads the image directly)
+	imageMIME string
+}
+
+// readDocSearchInput reads a multipart file (text/docx/xlsx/image) or a JSON
+// {text, top_k} body. It writes the error response itself and returns ok=false
+// on failure.
+func readDocSearchInput(w http.ResponseWriter, r *http.Request) (docSearchInput, bool) {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 		r.Body = http.MaxBytesReader(w, r.Body, maxDocSearchBytes+(1<<20))
 		if err := r.ParseMultipartForm(maxDocSearchBytes); err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
 				writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("文档超过 %dMB 限制", maxDocSearchBytes/(1024*1024)))
-				return "", 0, false
+				return docSearchInput{}, false
 			}
 			writeError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
-			return "", 0, false
+			return docSearchInput{}, false
 		}
-		file, _, err := r.FormFile("file")
+		file, header, err := r.FormFile("file")
 		if err != nil {
 			writeError(w, http.StatusBadRequest, `expected a multipart "file" field: `+err.Error())
-			return "", 0, false
+			return docSearchInput{}, false
 		}
 		defer file.Close()
 		raw, err := io.ReadAll(io.LimitReader(file, maxDocSearchBytes))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "read document: "+err.Error())
-			return "", 0, false
+			return docSearchInput{}, false
 		}
-		if bytes.IndexByte(raw, 0) >= 0 {
-			writeError(w, http.StatusUnsupportedMediaType, "当前仅支持纯文本文档（.txt/.md/.csv）；PDF/Word/Excel/图片将在后续版本支持，可先粘贴文本")
-			return "", 0, false
+		if len(raw) == 0 {
+			writeError(w, http.StatusBadRequest, "文档为空")
+			return docSearchInput{}, false
 		}
-		return string(raw), 10, true
+
+		text, err := documentextract.FromFile(raw, header.Header.Get("Content-Type"))
+		if err != nil {
+			switch {
+			case errors.Is(err, documentextract.ErrImage):
+				return docSearchInput{image: raw, imageMIME: header.Header.Get("Content-Type"), topK: 10}, true
+			case errors.Is(err, documentextract.ErrUnsupported):
+				writeError(w, http.StatusUnsupportedMediaType, "暂不支持该文档格式（如 PDF）；请粘贴文本，或改用 .txt/.md/.docx/.xlsx/图片")
+				return docSearchInput{}, false
+			default:
+				writeError(w, http.StatusBadRequest, "文档解析失败："+err.Error())
+				return docSearchInput{}, false
+			}
+		}
+		return docSearchInput{text: text, topK: 10}, true
 	}
 
 	var req docSearchRequest
 	if !decodeOptionalJSONBody(w, r, maxDocSearchBytes, &req) {
-		return "", 0, false
+		return docSearchInput{}, false
 	}
-	return req.Text, req.TopK, true
+	return docSearchInput{text: req.Text, topK: req.TopK}, true
 }
 
 // docPassesHardFilters applies the extracted region / category / qualification
