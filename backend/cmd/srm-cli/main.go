@@ -10,6 +10,8 @@
 //	srm-cli add <file.json|-> [--visibility N] [--owner user]
 //	srm-cli list [filters] [--limit N] [--cursor CURSOR] [--json]
 //	srm-cli search <keyword> [filters]   (FTS backend lands later; same flags)
+//	srm-cli ainl "自然语言需求" [--limit N] [--json]
+//	                                         AI 自然语言搜索：整句需求 → 结构化筛选 → 列表
 //	srm-cli analyze <doc.txt|docx|xlsx|图片|-> [--top N] [--json]
 //	                                         AI 文档分析搜索：提取需求 → 语义匹配推荐供应商
 //	srm-cli info <id> [--json]
@@ -69,6 +71,9 @@ func main() {
 		// For now search == list with a keyword; the FTS-backed search
 		// port lands next without changing this command's surface.
 		err = cmdSearch(args)
+	case "ainl", "nlsearch":
+		// AI 自然语言搜索：整句需求 → 结构化筛选 → 列表。
+		err = cmdNLSearch(args)
 	case "analyze":
 		// AI 文档分析搜索 (PRD: srm-cli analyze ./需求.docx): upload a
 		// requirement document, LLM extracts the requirement and the semantic
@@ -375,6 +380,116 @@ func cmdSearch(args []string) error {
 		cmdArgs = append([]string{"--q", kw}, cmdArgs...)
 	}
 	return cmdList(cmdArgs)
+}
+
+// nlFilter is the CLI projection of POST /ai/nl-search.
+type nlFilter struct {
+	Keyword      string  `json:"keyword"`
+	Province     string  `json:"province"`
+	City         string  `json:"city"`
+	District     string  `json:"district"`
+	Category     string  `json:"category"`
+	MinQualLevel string  `json:"min_qual_level"`
+	MinRating    float64 `json:"min_rating"`
+}
+
+// cmdNLSearch turns a natural-language sentence into a structured filter via
+// the sidecar's /ai/nl-search (shared nlsearch.Parse) and lists matching
+// suppliers. Requires the sidecar running with an AI provider configured;
+// without one the endpoint returns a clear error.
+func cmdNLSearch(args []string) error {
+	fs := flag.NewFlagSet("ainl", flag.ContinueOnError)
+	limit := fs.Int("limit", 20, "page size (max 100)")
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	query := strings.Join(fs.Args(), " ")
+	if strings.TrimSpace(query) == "" {
+		return fmt.Errorf("usage: srm-cli ainl \"自然语言需求\" [--limit N] [--json]")
+	}
+
+	// 1. Ask the LLM (via the sidecar) to parse it into a structured filter.
+	rb, _ := json.Marshal(map[string]string{"query": query})
+	req, err := http.NewRequest(http.MethodPost, apiBase()+"/api/v1/ai/nl-search", bytes.NewReader(rb))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+	var f nlFilter
+	if err := json.NewDecoder(resp.Body).Decode(&f); err != nil {
+		return err
+	}
+
+	// 2. Build a structured list query from the parsed filter.
+	q := url.Values{}
+	q.Set("limit", fmt.Sprintf("%d", *limit))
+	for _, kv := range [][2]string{
+		{"q", f.Keyword}, {"province", f.Province}, {"city", f.City},
+		{"district", f.District}, {"category", f.Category}, {"min_qual_level", f.MinQualLevel},
+	} {
+		if kv[1] != "" {
+			q.Set(kv[0], kv[1])
+		}
+	}
+	if f.MinRating > 0 {
+		q.Set("min_rating", fmt.Sprintf("%.1f", f.MinRating))
+	}
+
+	parts := []string{f.Province, f.City, f.District, f.Category, f.MinQualLevel}
+	if f.MinRating > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f 分以上", f.MinRating))
+	}
+	fmt.Fprintf(os.Stderr, "AI 已解析：%s\n", strings.Join(nonEmptyOf(parts), " · "))
+
+	lresp, err := http.Get(apiBase() + "/api/v1/suppliers?" + q.Encode())
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer lresp.Body.Close()
+	if lresp.StatusCode != http.StatusOK {
+		return decodeAPIError(lresp)
+	}
+	var page struct {
+		Items []domain.Summary `json:"items"`
+	}
+	if err := json.NewDecoder(lresp.Body).Decode(&page); err != nil {
+		return err
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(page)
+	}
+	if len(page.Items) == 0 {
+		fmt.Println("(no suppliers match)")
+		return nil
+	}
+	for _, s := range page.Items {
+		loc := strings.TrimSpace(s.Province + " " + s.City + " " + s.District)
+		fmt.Printf("%s  %-4.1f★  %-12s  %s  %s\n", s.ID, s.Rating, s.TopQual, loc, s.Name)
+	}
+	return nil
+}
+
+// nonEmptyOf returns the non-empty elements of a []string.
+func nonEmptyOf(parts []string) []string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // analyzeResult is the CLI projection of POST /ai/doc-search.

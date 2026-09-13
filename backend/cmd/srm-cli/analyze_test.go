@@ -62,3 +62,45 @@ func TestCmdAnalyzeUsageError(t *testing.T) {
 		t.Fatalf("no-arg call must return usage error, got %v", err)
 	}
 }
+
+// TestCmdNLSearchParsesAndLists: a fake sidecar serves /ai/nl-search (returns a
+// structured filter) and /api/v1/suppliers (returns a matching summary); the
+// CLI prints the parsed filter + the supplier.
+func TestCmdNLSearchParsesAndLists(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/ai/nl-search":
+			w.Write([]byte(`{"keyword":"商砼","province":"浙江","city":"杭州","category":"市政工程","min_qual_level":"二级","min_rating":0}`))
+		case "/api/v1/suppliers":
+			w.Write([]byte(`{"items":[{"id":"sup_2026_000001","name":"杭州混凝土工程有限公司","province":"浙江","city":"杭州","top_qual":"二级","rating":4.5}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	orig := os.Getenv("SRM_API_ADDR")
+	_ = os.Setenv("SRM_API_ADDR", srv.URL)
+	defer os.Setenv("SRM_API_ADDR", orig)
+
+	old := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	err := cmdNLSearch([]string{"杭州市政二级"})
+	_ = pw.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "杭州混凝土") {
+		t.Fatalf("ainl output missing supplier:\n%s", buf.String())
+	}
+}
+
+func TestCmdNLSearchUsageError(t *testing.T) {
+	if err := cmdNLSearch([]string{}); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("no-arg call must return usage error, got %v", err)
+	}
+}
