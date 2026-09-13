@@ -99,7 +99,7 @@
 - [x] **风险标记与空壳检测**：rule engine 扫描（R1xx/R2xx/R3xx 规则）→ `risk_flags` 标记 + 风险预警；黑名单/归档生命周期；人工审核闭环——2026-09-08
 - [x] **合作记录与绩效评价**：项目合作归档；交付/质量/配合度评分（三维）；绩效历史进入档案并影响搜索排序（`recomputeRating`）——2026-09-08
 - [x] **基础项目比价（非 AI）**：多供应商横向对比表（价格/交付/资质），手工选择供应商生成对比；CLI compare + 前端 CompareView——2026-09-08
-- [ ] **AI Gateway 统一适配层**（个人版也需实现，见 TR-19-A）：双 Provider 适配器（已落地 TR-19-A）；token 用量统计与月度报告（`aigateway.UsageSink` + `usage.Tracker` 按 settings 持久化 + `GET /api/v1/ai/usage` + 设置页「本月 AI 用量」卡，已落地 2026-09-14）；相同请求缓存（`ResponseCache` 有界 TTL + 指纹，chat 按 task/model/base/JSON_mode/messages 键控、vision 跳过、命中不记账，已落地 2026-09-14）；模型路由（按任务类型）、主模型失败 fallback（待办）；无 Key 时整体降级。**已预留**：`ai_gateway` 接口骨架 + taskqueue（channel 内存队列）
+- [ ] **AI Gateway 统一适配层**（个人版也需实现，见 TR-19-A）：双 Provider 适配器（已落地 TR-19-A）；token 用量统计与月度报告（`aigateway.UsageSink` + `usage.Tracker` 按 settings 持久化 + `GET /api/v1/ai/usage` + 设置页「本月 AI 用量」卡，已落地 2026-09-14）；相同请求缓存（`ResponseCache` 有界 TTL + 指纹，chat 按 task/model/base/JSON_mode/messages 键控、vision 跳过、命中不记账，已落地 2026-09-14）；主模型失败 fallback（Config 增 fallback_base/api_key/model，备用与主同协议；主失败→备用、备用响应不缓存、`/ai/config` + 设置页备用卡；已落地 2026-09-14）；模型路由（按任务类型，待办）；无 Key 时整体降级。**已预留**：`ai_gateway` 接口骨架 + taskqueue（channel 内存队列）
 - [ ] **AI 辅助录入**：OCR（PaddleOCR/Tesseract）识别营业执照/资质证书 → LLM 抽取结构化字段自动填表；Excel 列名 AI 智能映射（feature flag 门控位已留）
 - [ ] **文档分析搜索**：上传 PDF/Word/Excel/图片 → OCR → LLM 提取需求要素 → bge-m3 embedding → Qdrant 内嵌向量相似搜索 + 关键词 + 地域/资质硬过滤 → 推荐列表 + 匹配理由 + 自动比价表
 - [x] **自然语言搜索**："杭州本地能做市政工程的二级资质以上供应商" → LLM 转结构化 Filter——共享 `internal/nlsearch.Parse`（prompt+JSON 解析+资质校验+评分钳制）三端复用：HTTP `POST /ai/nl-search`（TR-19-D）+ CLI `srm-cli ainl`（经 sidecar 端点）+ MCP `nl_search_suppliers` tool；无 Key → ErrAIDisabled 降级——2026-09-14

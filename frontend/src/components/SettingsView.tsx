@@ -214,6 +214,9 @@ function AIConfigCard() {
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
+  const [fbBase, setFbBase] = useState('')
+  const [fbKey, setFbKey] = useState('')
+  const [fbModel, setFbModel] = useState('')
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<AITestResult | null>(null)
@@ -228,6 +231,8 @@ function AIConfigCard() {
         setBaseURL(r.config.base_url)
         setModel(r.config.model)
         setMaxTokens(r.config.max_tokens ? String(r.config.max_tokens) : '')
+        setFbBase(r.config.fallback_base_url ?? '')
+        setFbModel(r.config.fallback_model ?? '')
       })
       .catch(() => {}) // AI config is optional; card still renders
     // 本月 AI 用量（0 也是有效答案）。
@@ -253,9 +258,13 @@ function AIConfigCard() {
         api_key: apiKey.trim(),
         model: model.trim(),
         max_tokens: maxTokens ? Number(maxTokens) : undefined,
+        fallback_base_url: fbBase.trim() || undefined,
+        fallback_api_key: fbKey.trim() || undefined,
+        fallback_model: fbModel.trim() || undefined,
       })
       setResp(r)
       setApiKey('') // key saved; do not keep it in the field
+      setFbKey('')
       toast.success(r.configured ? 'AI 模型已保存，AI 功能已启用' : '已清除 AI 配置，AI 功能已关闭')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
@@ -282,6 +291,9 @@ function AIConfigCard() {
     setModel('')
     setFormat('openai')
     setMaxTokens('')
+    setFbBase('')
+    setFbKey('')
+    setFbModel('')
   }
 
   const configured = resp?.configured ?? false
@@ -340,6 +352,25 @@ function AIConfigCard() {
           <span className="label">最大输出 tokens（可选）</span>
           <input className="input" type="number" min="1" placeholder="留空用默认" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
         </label>
+      </div>
+
+      {/* 可选 fallback 备用提供商：主模型失败（宕机/限流）时自动切换；与主同协议。 */}
+      <div className="mt-3 border-t border-slate-100 pt-3">
+        <span className="label">备用提供商 / Fallback（可选，主模型不可用时自动切换）</span>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="block">
+            <span className="label">Base URL</span>
+            <input className="input" placeholder="如 https://api.deepseek.com" value={fbBase} onChange={(e) => setFbBase(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label">API Key</span>
+            <input className="input" type="password" autoComplete="off" placeholder={resp?.config.fallback_base_url ? '已配置（留空保持不变）' : 'sk-…'} value={fbKey} onChange={(e) => setFbKey(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label">模型 ID</span>
+            <input className="input" placeholder="如 deepseek-chat" value={fbModel} onChange={(e) => setFbModel(e.target.value)} />
+          </label>
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">

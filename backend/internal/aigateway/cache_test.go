@@ -146,6 +146,61 @@ func TestServiceCacheMissOnDifferentPrompt(t *testing.T) {
 	}
 }
 
+func TestServiceFallbackServesWhenPrimaryFails(t *testing.T) {
+	// Counted upstreams: primary 5xx, fallback 200.
+	var pMu, fMu sync.Mutex
+	pN, fN := 0, 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pMu.Lock()
+		pN++
+		pMu.Unlock()
+		http.Error(w, "upstream down", http.StatusServiceUnavailable)
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fMu.Lock()
+		fN++
+		fMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"fallback-ok"}}],"usage":{"prompt_tokens":3,"completion_tokens":1}}`))
+	}))
+	defer fallback.Close()
+
+	gw := New(Config{
+		Format:          FormatOpenAI,
+		BaseURL:         primary.URL,
+		APIKey:          "k",
+		Model:           "m",
+		FallbackBaseURL: fallback.URL,
+		FallbackAPIKey:  "k2",
+		FallbackModel:   "m2",
+	}, nil)
+	gw.SetResponseCache(NewResponseCache(0, 0))
+
+	ctx := context.Background()
+	req := ChatRequest{Task: "summarize", Messages: []ChatMessage{{Role: "user", Content: "hello"}}}
+	resp, err := gw.Complete(ctx, req)
+	if err != nil {
+		t.Fatalf("fallback should have served: %v", err)
+	}
+	if resp.Text != "fallback-ok" {
+		t.Fatalf("text = %q, want fallback-ok (primary failed → fallback)", resp.Text)
+	}
+
+	// A repeated identical call must NOT be served from cache (fallback responses
+	// are uncached): the primary is hit again, then the fallback.
+	if _, err := gw.Complete(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	pMu.Lock()
+	fMu.Lock()
+	if pN != 2 || fN != 2 {
+		t.Fatalf("provider calls primary=%d fallback=%d, want 2/2 (fallback responses not cached)", pN, fN)
+	}
+	fMu.Unlock()
+	pMu.Unlock()
+}
+
 func TestServiceCacheBypassesImages(t *testing.T) {
 	up, count, mu := countingUpstream(t)
 	defer up.Close()

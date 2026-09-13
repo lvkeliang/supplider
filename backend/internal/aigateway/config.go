@@ -34,20 +34,32 @@ type Config struct {
 	EmbeddingModel string `json:"embedding_model,omitempty"`
 	// MaxTokens caps output; 0 means the adapter default.
 	MaxTokens int `json:"max_tokens,omitempty"`
+
+	// Fallback provider — tried when the primary fails (outage / rate-limit /
+	// 4xx-5xx). Same wire format as the primary (an anthropic-format primary
+	// falls back to an anthropic-format provider). All three empty = no
+	// fallback.
+	FallbackBaseURL string `json:"fallback_base_url,omitempty"`
+	FallbackAPIKey  string `json:"fallback_api_key,omitempty"`
+	FallbackModel   string `json:"fallback_model,omitempty"`
 }
 
-// Redacted is the config safe to echo to the UI: the key is masked.
+// Redacted is the config safe to echo to the UI: the keys are masked.
 func (c Config) Redacted() Config {
-	if c.APIKey == "" {
-		return c
+	c.APIKey = maskKey(c.APIKey)
+	c.FallbackAPIKey = maskKey(c.FallbackAPIKey)
+	return c
+}
+
+func maskKey(k string) string {
+	if k == "" {
+		return ""
 	}
-	k := c.APIKey
 	keep := 4
 	if len(k) <= keep*2 {
 		keep = len(k) / 2
 	}
-	c.APIKey = k[:keep] + strings.Repeat("•", len(k)-keep)
-	return c
+	return k[:keep] + strings.Repeat("•", len(k)-keep)
 }
 
 // Provider is a one-click preset (设置页 快捷填充).
@@ -78,6 +90,20 @@ const SettingKey = "ai.config"
 // Valid reports whether the config has enough to attempt a call.
 func (c Config) Valid() bool {
 	return c.APIKey != "" && c.Model != "" && c.BaseURL != ""
+}
+
+// Fallback returns the effective fallback config (same wire format as the
+// primary, different base/key/model) when all three fallback fields are set.
+func (c Config) Fallback() (Config, bool) {
+	if c.FallbackAPIKey == "" || c.FallbackModel == "" || c.FallbackBaseURL == "" {
+		return Config{}, false
+	}
+	return Config{
+		Format:  c.Format,
+		BaseURL: c.FallbackBaseURL,
+		APIKey:  c.FallbackAPIKey,
+		Model:   c.FallbackModel,
+	}, true
 }
 
 // DecodeConfig unmarshals a persisted config blob. Empty/absent blob yields

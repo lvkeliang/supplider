@@ -24,6 +24,10 @@ type Service struct {
 	// cache short-circuits identical completions to save tokens. Optional;
 	// wired for production via SetResponseCache (tests keep it nil).
 	cache *ResponseCache
+	// fallback is tried when the primary adapter errors (outage/rate-limit).
+	// Same wire format as the primary; only primary-served responses are cached
+	// so a recovered primary never serves a fallback-stale cache entry.
+	fallback adapter
 }
 
 // adapter is the internal completion surface both wire formats implement.
@@ -33,18 +37,28 @@ type adapter interface {
 }
 
 // New builds a Service from a config. A nil/invalid config yields a disabled
-// Service whose Complete/Embed return ErrAIDisabled.
+// Service whose Complete/Embed return ErrAIDisabled. When the config declares a
+// fallback provider (主模型失败 fallback), a second adapter is built and tried
+// after the primary fails.
 func New(cfg Config, client *http.Client) *Service {
 	s := &Service{config: cfg}
 	if cfg.Valid() {
-		switch cfg.Format {
-		case FormatAnthropic:
-			s.adapter = NewAnthropicAdapter(cfg, client)
-		default:
-			s.adapter = NewOpenAIAdapter(cfg, client)
+		s.adapter = newAdapter(cfg, client)
+		if fcfg, ok := cfg.Fallback(); ok {
+			s.fallback = newAdapter(fcfg, client)
 		}
 	}
 	return s
+}
+
+// newAdapter builds the format-appropriate adapter for a config.
+func newAdapter(cfg Config, client *http.Client) adapter {
+	switch cfg.Format {
+	case FormatAnthropic:
+		return NewAnthropicAdapter(cfg, client)
+	default:
+		return NewOpenAIAdapter(cfg, client)
+	}
 }
 
 // Enabled reports whether a provider is configured and usable.
@@ -111,6 +125,7 @@ func (s *Service) Complete(ctx context.Context, req ChatRequest) (ChatResponse, 
 	s.mu.RLock()
 	a := s.adapter
 	cache := s.cache
+	fallback := s.fallback
 	s.mu.RUnlock()
 	if a == nil {
 		return ChatResponse{}, ErrAIDisabled
@@ -126,23 +141,32 @@ func (s *Service) Complete(ctx context.Context, req ChatRequest) (ChatResponse, 
 		}
 	}
 
+	// Config is immutable per Service (a swap builds a fresh Service), so
+	// reading it here without the lock is safe.
+	var key string
 	if cache != nil && !hasImage {
-		// Config is immutable per Service (a swap builds a fresh Service), so
-		// reading it here without the lock is safe.
-		key := fingerprint(req.Task, s.config.Model, s.config.BaseURL, req.JSONMode, req.Messages)
+		key = fingerprint(req.Task, s.config.Model, s.config.BaseURL, req.JSONMode, req.Messages)
 		if resp, ok := cache.Get(key); ok {
 			return resp, nil // cache hit — no provider call, no token charge
 		}
-		resp, err := a.Complete(ctx, req)
-		if err == nil {
-			cache.Put(key, resp)
-			s.reportUsage(ctx, req.Task, resp.TokensIn, resp.TokensOut)
-		}
-		return resp, err
 	}
 
 	resp, err := a.Complete(ctx, req)
+	fromFallback := false
+	if err != nil && fallback != nil {
+		// 主模型失败 fallback: primary errored (outage / rate-limit) → try the
+		// backup provider. Fallback-served responses are NOT cached (a recovered
+		// primary must not serve a fallback-stale entry) and not billed as the
+		// primary's usage — the response's own token counts are still recorded.
+		if fr, ferr := fallback.Complete(ctx, req); ferr == nil {
+			resp, err, fromFallback = fr, nil, true
+		}
+	}
+
 	if err == nil {
+		if cache != nil && !hasImage && !fromFallback {
+			cache.Put(key, resp)
+		}
 		s.reportUsage(ctx, req.Task, resp.TokensIn, resp.TokensOut)
 	}
 	return resp, err

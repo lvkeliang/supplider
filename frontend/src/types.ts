@@ -313,13 +313,17 @@ export interface AIPreset {
   model: string
 }
 
-/** Provider config as the server returns it (api_key is REDACTED). */
+/** Provider config as the server returns it (api keys are REDACTED). */
 export interface AIConfig {
   format: AIFormat | ''
   base_url: string
   api_key?: string // redacted — never sent back in full
   model: string
   max_tokens?: number
+  // 可选 fallback 备用提供商（主模型失败时切换；与主同协议）。
+  fallback_base_url?: string
+  fallback_api_key?: string
+  fallback_model?: string
 }
 
 export interface AIConfigResponse {

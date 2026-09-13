@@ -363,6 +363,9 @@ export const api = {
     api_key: string
     model: string
     max_tokens?: number
+    fallback_base_url?: string
+    fallback_api_key?: string
+    fallback_model?: string
   }) => request<AIConfigResponse>('PUT', '/api/v1/ai/config', cfg),
   testAI: () => request<AITestResult>('GET', '/api/v1/ai/test'),
   // OCR 辅助录入 (TR-19-B): upload a license photo, get extracted fields.
