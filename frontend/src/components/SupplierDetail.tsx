@@ -45,6 +45,8 @@ export function SupplierDetail({ id, go, aiEnabled = false }: { id: string; go: 
   const [reviewing, setReviewing] = useState(false)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiSummary, setAiSummary] = useState<string | null>(null)
+  const [riskBusy, setRiskBusy] = useState(false)
+  const [riskReport, setRiskReport] = useState<string | null>(null)
   // 合并重复档案选择器：从查重结果里直接挑选要并入的档案（手输 id 仅作兜底）。
   const [mergeOpen, setMergeOpen] = useState(false)
   const [mergeCandidates, setMergeCandidates] = useState<DuplicateMatch[] | null>(null)
@@ -142,6 +144,19 @@ export function SupplierDetail({ id, go, aiEnabled = false }: { id: string; go: 
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setAiBusy(false)
+    }
+  }
+
+  const generateRiskReport = async () => {
+    setRiskBusy(true)
+    setError('')
+    try {
+      const r = await api.aiRiskReport(id)
+      setRiskReport(r.report)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRiskBusy(false)
     }
   }
 
@@ -336,9 +351,14 @@ export function SupplierDetail({ id, go, aiEnabled = false }: { id: string; go: 
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
           {aiEnabled && (
-            <button className="btn-ghost" disabled={aiBusy} onClick={summarize} title="AI 一句话概括该档案的定位/资质/信誉/风险">
-              <Icon name="info" size={15} /> {aiBusy ? '生成中…' : 'AI 摘要'}
-            </button>
+            <>
+              <button className="btn-ghost" disabled={aiBusy} onClick={summarize} title="AI 一句话概括该档案的定位/资质/信誉/风险">
+                <Icon name="info" size={15} /> {aiBusy ? '生成中…' : 'AI 摘要'}
+              </button>
+              <button className="btn-ghost" disabled={riskBusy} onClick={generateRiskReport} title="AI 结合档案+规则信号+变更记录生成空壳风险评估报告">
+                <Icon name="alert" size={15} /> {riskBusy ? '分析中…' : 'AI 风险报告'}
+              </button>
+            </>
           )}
           {/* 关注在归档/在库状态下都可用（归档后仍保留关注与通知历史）。 */}
           <button
@@ -524,6 +544,14 @@ export function SupplierDetail({ id, go, aiEnabled = false }: { id: string; go: 
         <div className="rounded-lg border border-brand-200 dark:border-brand-900 bg-brand-50 dark:bg-brand-900/30 px-4 py-3">
           <div className="text-sm font-medium text-brand-800 dark:text-brand-300">AI 档案摘要</div>
           <p className="mt-1 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{aiSummary}</p>
+        </div>
+      )}
+
+      {/* AI 空壳风险报告 (PRD 3.5): LLM risk assessment over local rules. */}
+      {riskReport && (
+        <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-4 py-3">
+          <div className="text-sm font-medium text-red-800 dark:text-red-300">AI 空壳风险评估报告</div>
+          <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-200">{riskReport}</div>
         </div>
       )}
 

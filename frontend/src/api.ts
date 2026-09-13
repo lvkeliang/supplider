@@ -11,6 +11,7 @@ import type {
   SemanticIndexResult,
   AICompareResponse,
   AISummaryResponse,
+  AIRiskReportResponse,
   DuplicateMatch,
   ExpiringReport,
   Features,
@@ -397,6 +398,9 @@ export const api = {
   // AI 档案摘要 (PRD 3.5): one-paragraph summary of a supplier archive.
   aiSummarize: (id: string) =>
     request<AISummaryResponse>('POST', `/api/v1/ai/summarize/${id}`),
+  // AI 空壳风险报告 (PRD 3.5): LLM risk assessment over the local rule signals.
+  aiRiskReport: (id: string) =>
+    request<AIRiskReportResponse>('POST', `/api/v1/ai/risk-report/${id}`),
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

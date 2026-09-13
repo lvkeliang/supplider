@@ -396,6 +396,11 @@ export interface AISummaryResponse {
   summary: string
 }
 
+/** AI 空壳风险报告 (PRD 3.5): LLM risk assessment layered on the local rules. */
+export interface AIRiskReportResponse {
+  report: string
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */
