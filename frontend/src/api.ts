@@ -13,6 +13,7 @@ import type {
   AISummaryResponse,
   AIRiskReportResponse,
   AIUsage,
+  AuditResponse,
   DuplicateMatch,
   ExpiringReport,
   Features,
@@ -404,6 +405,8 @@ export const api = {
     request<AIRiskReportResponse>('POST', `/api/v1/ai/risk-report/${id}`),
   // 本月 AI 用量统计（calls / tokens），从设置持久化读回。
   aiUsage: () => request<AIUsage>('GET', '/api/v1/ai/usage'),
+  // 操作审计日志：跨供应商生命周期轨迹（创建/修改/归档/黑名单/合并/导出）。
+  audit: (limit = 50) => request<AuditResponse>('GET', `/api/v1/audit?limit=${limit}`),
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

@@ -10,6 +10,7 @@ import type {
   AIPreset,
   AITestResult,
   AIUsage,
+  AuditResponse,
   LocalPreference,
   RestoreStatus,
   VisibilityPolicyResponse,
@@ -138,11 +139,65 @@ export function SettingsView({ go }: { go: Go }) {
 
       <AIConfigCard />
 
+      <AuditCard />
+
       <BackupRestoreCard />
 
       <ShortcutsCard />
     </div>
   )
+}
+
+const AUDIT_ACTION_LABEL: Record<string, string> = {
+  create: '创建',
+  update: '修改',
+  archive: '归档',
+  restore: '恢复',
+  blacklist: '列入黑名单',
+  unblacklist: '移出黑名单',
+  merge: '合并',
+  import: '批量导入',
+  export: '导出',
+  visibility: '可见性变更',
+}
+
+/** 操作审计日志：最近的生命周期轨迹（跨供应商，newest first）。 */
+function AuditCard() {
+  const [audit, setAudit] = useState<AuditResponse | null>(null)
+  useEffect(() => {
+    api
+      .audit(30)
+      .then(setAudit)
+      .catch(() => {})
+  }, [])
+
+  const items = audit?.items ?? []
+  return (
+    <DocumentCard title="操作审计日志（最近）" defaultOpen={false} count={audit?.count}>
+      {items.length === 0 ? (
+        <p className="py-2 text-sm text-slate-400">还没有操作记录。</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {items.map((e, i) => (
+            <li key={`${e.time}-${e.action}-${i}`} className="flex items-center gap-2 py-1.5 text-sm">
+              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                {AUDIT_ACTION_LABEL[e.action] ?? e.action}
+              </span>
+              <span className="truncate text-slate-700">{e.name || e.target_id || '—'}</span>
+              <span className="ml-auto shrink-0 text-xs text-slate-400">{fmtAuditTime(e.time)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </DocumentCard>
+  )
+}
+
+function fmtAuditTime(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 /**

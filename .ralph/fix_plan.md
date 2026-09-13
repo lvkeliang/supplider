@@ -109,7 +109,7 @@
 - [ ] **MongoDB 存储适配器**（`//go:build enterprise` / small-business）：BSON 文档操作、复合索引（可见性+品类+地域）；与 SQLite 适配器跑同一 contract test 套件
 - [ ] **Docker Compose 一键部署**：Go-Zero 单体 + Nginx + MongoDB + Meilisearch + MinIO；安装脚本
 - [ ] **MinIO/对象存储抽象**：S3 兼容接口，本地 FS / MinIO / S3 可切换。**已落地**：`objectstore.Store` 端口 + `localfs` 适配器 + `objectfactory` 接线
-- [ ] **操作审计日志**：录入/修改/删除/可见性变更/导出全记录，按时间/用户/类型查询（小企业版基础级）
+- [x] **操作审计日志**：录入/修改/归档/恢复/黑名单/移出黑名单/合并/批量导入/导出全记录，跨供应商轨迹 newest-first 持久化（settings 键 `audit.trail`，随库备份跨重启），`GET /api/v1/audit` + 设置页「操作审计日志」卡（动作/名称/时间）；actor=local（个人版单用户，多用户字段预留）——2026-09-14
 - [ ] **异步任务队列**：内存 channel 实现抽象接口（已落地），为 NATS 替换做准备（变更监控、AI 推理任务）
 - [ ] **通知系统**：变更推送、到期提醒、审批通知。**已落地**：应用内通知（铃铛+dedup）；**待办**：企业版通知服务把 `VisibilityViolation`/`Notification` payload 扇出到钉钉/企微（接口形状已预留）
 - [ ] **共享贡献度激励**：共享越多搜索优先级越高、贡献度指标（对抗"平台退化为个人工具"风险）

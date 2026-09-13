@@ -59,6 +59,7 @@ import (
 	"time"
 
 	"github.com/supplider/supplider/backend/internal/aigateway"
+	"github.com/supplider/supplider/backend/internal/audit"
 	"github.com/supplider/supplider/backend/internal/backup"
 	"github.com/supplider/supplider/backend/internal/datamodel"
 	"github.com/supplider/supplider/backend/internal/domain"
@@ -94,7 +95,11 @@ type Server struct {
 	// Restore wires in-app restore/migration (staged zip, swapped in at
 	// next process start); nil answers 501 on /api/v1/backup/restore.
 	Restore *RestoreFuncs
-	Mux     *http.ServeMux
+	// Audit records the cross-supplier lifecycle trail (create/update/archive/
+	// blacklist/merge/export/visibility), persisted via the supplier store.
+	// Wired by default in New.
+	Audit *audit.Recorder
+	Mux   *http.ServeMux
 }
 
 // BackupFunc streams one backup archive to w (see internal/backup).
@@ -110,7 +115,13 @@ type RestoreFuncs struct {
 
 // New wires routes and returns the server.
 func New(svc *supplier.Service, feats featureflag.Features) *Server {
-	s := &Server{Service: svc, Features: feats, Mux: http.NewServeMux(), aiClient: &http.Client{Timeout: 120 * time.Second}}
+	s := &Server{
+		Service:  svc,
+		Features: feats,
+		Mux:      http.NewServeMux(),
+		aiClient: &http.Client{Timeout: 120 * time.Second},
+		Audit:    audit.New(svc),
+	}
 	s.routes()
 	return s
 }
@@ -213,6 +224,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/v1/ai/summarize/{id}", s.handleAISummarize)
 	s.Mux.HandleFunc("POST /api/v1/ai/risk-report/{id}", s.handleAIRiskReport)
 	s.Mux.HandleFunc("GET /api/v1/ai/usage", s.handleAIUsage)
+	s.Mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
 	s.Mux.HandleFunc("POST /api/v1/suppliers", s.handleCreate)
 	s.Mux.HandleFunc("GET /api/v1/suppliers", s.handleList)
 	s.Mux.HandleFunc("GET /api/v1/suppliers/duplicates", s.handleDuplicates)
@@ -304,6 +316,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	s.Audit.Record(r.Context(), "create", doc.ID, doc.BasicInfo.CompanyName)
 	writeJSON(w, http.StatusCreated, doc)
 }
 
@@ -376,14 +389,23 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	s.Audit.Record(r.Context(), "update", doc.ID, doc.BasicInfo.CompanyName)
 	writeJSON(w, http.StatusOK, doc)
 }
 
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
-	if err := s.Service.Archive(r.Context(), r.PathValue("id")); err != nil {
+	id := r.PathValue("id")
+	// Fetch the name for the audit trail before the record is archived.
+	doc, err := s.Service.Get(r.Context(), id)
+	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
+	if err := s.Service.Archive(r.Context(), id); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.Audit.Record(r.Context(), "archive", id, doc.BasicInfo.CompanyName)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -393,6 +415,7 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	s.Audit.Record(r.Context(), "restore", doc.ID, doc.BasicInfo.CompanyName)
 	writeJSON(w, http.StatusOK, doc)
 }
 
@@ -417,6 +440,7 @@ func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	s.Audit.Record(r.Context(), "blacklist", doc.ID, doc.BasicInfo.CompanyName)
 	writeJSON(w, http.StatusOK, doc)
 }
 
@@ -426,6 +450,7 @@ func (s *Server) handleUnblacklist(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	s.Audit.Record(r.Context(), "unblacklist", doc.ID, doc.BasicInfo.CompanyName)
 	writeJSON(w, http.StatusOK, doc)
 }
 
@@ -453,6 +478,7 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	s.Audit.Record(r.Context(), "merge", doc.ID, doc.BasicInfo.CompanyName)
 	writeJSON(w, http.StatusOK, map[string]any{"supplier": doc, "merged": res})
 }
 
@@ -712,6 +738,7 @@ func (s *Server) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 		opts.SkipDuplicates = true
 	}
 	report := s.Service.Import(r.Context(), items, opts)
+	s.Audit.Record(r.Context(), "import", "", fmt.Sprintf("%d 行", len(items)))
 	writeJSON(w, http.StatusOK, report)
 }
 
@@ -1540,6 +1567,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	if format == "" {
 		format = "json"
 	}
+	s.Audit.Record(r.Context(), "export", "", fmt.Sprintf("%s %d 条", format, len(docs)))
 	stamp := time.Now().Format("20060102_150405")
 
 	switch format {

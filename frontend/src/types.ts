@@ -415,6 +415,20 @@ export interface AIUsage {
   by_task: Record<string, AICounter>
 }
 
+/** 操作审计日志 (GET /audit): one lifecycle action. */
+export interface AuditEntry {
+  time: string
+  action: string
+  target_id?: string
+  name?: string
+  actor: string
+}
+
+export interface AuditResponse {
+  count: number
+  items: AuditEntry[]
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */
