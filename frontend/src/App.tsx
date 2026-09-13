@@ -287,7 +287,9 @@ export default function App() {
         )}
         {view.name === 'settings' && <SettingsView go={go} />}
         {view.name === 'docsearch' && <DocSearch go={go} />}
-        {view.name === 'compare' && <CompareView ids={view.ids} go={go} />}
+        {view.name === 'compare' && (
+          <CompareView ids={view.ids} go={go} aiEnabled={features?.ai_enabled ?? false} />
+        )}
       </main>
     </div>
   )

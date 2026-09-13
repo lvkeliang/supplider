@@ -9,6 +9,7 @@ import type {
   OCRResult,
   DocSearchResponse,
   SemanticIndexResult,
+  AICompareResponse,
   DuplicateMatch,
   ExpiringReport,
   Features,
@@ -389,6 +390,9 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, data?.error ?? `HTTP ${res.status}`)
     return data as DocSearchResponse
   },
+  // AI 比价摘要 (PRD 3.5): summarize a multi-supplier comparison + recommend.
+  aiCompare: (ids: string[]) =>
+    request<AICompareResponse>('POST', '/api/v1/ai/compare', { ids }),
 
   // In-app restore/migration: validate and stage a backup zip; the swap
   // takes effect at the next application restart (current data is kept in

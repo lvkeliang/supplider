@@ -386,6 +386,11 @@ export interface SemanticIndexResult {
   indexed: number
 }
 
+/** AI 比价摘要 (PRD 3.5): prose recommendation for a multi-supplier comparison. */
+export interface AICompareResponse {
+  summary: string
+}
+
 // ---- Shell-company risk detection (空壳特征检测, non-AI rule engine) ----
 
 /** One fired local rule. Codes are stable (R1xx identity, R2xx profile, R3xx financial). */

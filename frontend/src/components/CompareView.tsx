@@ -4,6 +4,7 @@ import type { Performance, Supplier } from '../types'
 import { STATUS_BLACKLISTED } from '../types'
 import type { Go } from '../App'
 import { Icon } from './Icon'
+import { useToast } from './Toast'
 
 // 比价/选型对比：把搜索结果中勾选的多家供应商并排比较（评分、三维均分、
 // 资质、价格区间、风险等），与 srm-cli compare / MCP compare_suppliers
@@ -28,9 +29,24 @@ function fmt(v: number | null): string {
   return v === null ? '—' : v.toFixed(2)
 }
 
-export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
+export function CompareView({ ids, go, aiEnabled = false }: { ids: string[]; go: Go; aiEnabled?: boolean }) {
+  const toast = useToast()
   const [docs, setDocs] = useState<Supplier[] | null>(null)
   const [error, setError] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiSummary, setAiSummary] = useState<string | null>(null)
+
+  const runCompare = async () => {
+    setAiBusy(true)
+    try {
+      const r = await api.aiCompare(ids)
+      setAiSummary(r.summary)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiBusy(false)
+    }
+  }
 
   useEffect(() => {
     Promise.all(ids.map((id) => api.getSupplier(id)))
@@ -157,6 +173,22 @@ export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
       <p className="text-xs text-slate-400 dark:text-slate-500">
         点击公司名可进入完整档案（资质明细、附件、绩效记录、风险信号逐条说明）。评分来自绩效记录：总评优先，否则取交付/质量/配合度均值。
       </p>
+
+      {/* AI 比价摘要 (PRD 3.5): chat-based recommendation over the manual table.
+          Chat-only feature → gated on ai_enabled (not ai_doc_search). */}
+      {aiEnabled && (
+        <div>
+          <button className="btn-ghost" disabled={aiBusy} onClick={runCompare}>
+            <Icon name="scales" size={15} /> {aiBusy ? '分析中…' : 'AI 对比分析'}
+          </button>
+          {aiSummary && (
+            <div className="mt-3 rounded-lg border border-brand-200 dark:border-brand-900 bg-brand-50 dark:bg-brand-900/30 p-4 text-sm text-slate-700 dark:text-slate-200">
+              <div className="mb-2 font-medium text-brand-800 dark:text-brand-300">AI 比价建议</div>
+              <div className="whitespace-pre-wrap leading-relaxed">{aiSummary}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
