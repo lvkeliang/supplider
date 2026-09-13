@@ -9,9 +9,13 @@ Supplider 是面向项目型团队（起步于建筑施工行业）的本地供�
 通过 MCP，你可以直接读写用户**本地**的供应商库：全文搜索、查看文档式档案、
 资质到期与空壳风险扫描、录入供应商、并排比价。
 
-所有数据都在用户本机（SQLite 单文件），**无云端、无外部 AI、无网络请求**。
-风险扫描是纯本地规则（如统一社会信用代码 GB 32100 校验位、成立时长、资料
-完整度、资质登记），其结果**仅供人工参考**，不代表法律或财务结论。
+所有数据都在用户本机（SQLite 单文件）。基础搜索、筛选、风险扫描（统一社会
+信用代码 GB 32100 校验位、成立时长、资料完整度、资质登记）、资质到期提醒都
+是**纯本地规则、无网络请求**，其结果**仅供人工参考**，不代表法律或财务结论。
+唯一可能发起网络请求的是 `nl_search_suppliers`（自然语言搜索）：它把整句需求发
+给用户**在桌面端自行配置**的 AI 模型（DeepSeek / 通义 / GLM / Claude / Ollama
+等，模型调用由用户自配 Key 计费）。用户**未配置** AI 时该工具会返回明确错误，
+退回 `search_suppliers` + 结构化参数；其余所有工具均不依赖 AI、离线可用。
 
 ## MCP 配置
 
@@ -37,6 +41,7 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 | 工具 | 作用 | 关键参数 |
 | --- | --- | --- |
 | `search_suppliers` | 中文全文/拼音/同义词搜索 + 多维筛选；`q` 留空即列出首页 | `q, province, city, district, category, min_qual_level, min_rating, include_archived, limit` |
+| `nl_search_suppliers` | **AI 自然语言搜索**：把一句自然语言需求（如「杭州本地能做市政工程的二级资质以上供应商」）交给用户自配模型→结构化筛选→列表。**需用户已配置 AI**；未配置时返回明确错误（退回前面那条 `search_suppliers`） | `query`（必填）, `limit` |
 | `get_supplier` | 读取完整文档式档案（基本信息/资质/品类/产品/绩效/风险/自定义字段/附件/变更记录） | `id` |
 | `add_supplier` | 录入供应商（必填 `company_name, province, city`）；录入前自动查重，命中会在结果中给出重复警告（不阻断） | 见工具 schema |
 | `find_duplicates` | 录入前查重：按信用代码(确凿)/公司名(疑似)/名称相近(近似：简称全称包含、同拼音、一字之差，同省才提示)找可能重复的供应商（含黑名单/归档）；建议 add 前先调用。`possible` 仅低置信度参考，不得当作同一主体处置 | `name?`, `credit_code?`, `province?`, `city?` |
@@ -76,7 +81,8 @@ MCP 主机（Claude Desktop / Cursor 等）配置里添加（个人版二进制�
 ## 推荐工作流
 
 1. **找供应商**：先用 `search_suppliers`（可带 `q` 关键词、`city`/`category`/
-   `min_qual_level`/`min_rating` 筛选）；列表只返回摘要，拿到 id。
+   `min_qual_level`/`min_rating` 筛选）；列表只返回摘要，拿到 id。用户若配了 AI，
+   也可用 `nl_search_suppliers` 用一句话描述需求直接找（如「杭州本地二级市政」）。
 2. **看详情**：`get_supplier` 读取资质、绩效、风险、自定义字段。
 3. **合作前尽调**：调用 `supplier_risk`（或直接用 `supplier-due-diligence`
    prompt），并结合 `expiring_qualifications` 确认资质未过期/临期。
