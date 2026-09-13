@@ -84,6 +84,7 @@ func (s *Server) handleSaveAIConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	gw := aigateway.New(cfg, s.aiClient)
 	gw.SetUsageSink(usage.New(s.Service))
+	gw.SetResponseCache(aigateway.NewResponseCache(0, 0))
 	s.setGateway(gw)
 
 	writeJSON(w, http.StatusOK, aiConfigResponse{

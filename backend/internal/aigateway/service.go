@@ -21,6 +21,9 @@ type Service struct {
 	// once at construction via SetUsageSink; read under mu so a hot swap (a
 	// fresh Service) never races a Config() read on the old one.
 	usage UsageSink
+	// cache short-circuits identical completions to save tokens. Optional;
+	// wired for production via SetResponseCache (tests keep it nil).
+	cache *ResponseCache
 }
 
 // adapter is the internal completion surface both wire formats implement.
@@ -89,6 +92,14 @@ func (s *Service) reportUsage(ctx context.Context, task string, in, out int) {
 	}
 }
 
+// SetResponseCache attaches a bounded response cache (nil disables). Identical
+// completions then short-circuit the provider instead of re-billing tokens.
+func (s *Service) SetResponseCache(c *ResponseCache) {
+	s.mu.Lock()
+	s.cache = c
+	s.mu.Unlock()
+}
+
 // Config returns the redacted config (key masked) for display.
 func (s *Service) Config() Config {
 	s.mu.RLock()
@@ -99,10 +110,37 @@ func (s *Service) Config() Config {
 func (s *Service) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	s.mu.RLock()
 	a := s.adapter
+	cache := s.cache
 	s.mu.RUnlock()
 	if a == nil {
 		return ChatResponse{}, ErrAIDisabled
 	}
+
+	// Vision (image) calls are never cached — image bytes are large and not
+	// fingerprinted, so a hashed key could collide across different images.
+	hasImage := false
+	for _, m := range req.Messages {
+		if m.ImageBase64 != "" {
+			hasImage = true
+			break
+		}
+	}
+
+	if cache != nil && !hasImage {
+		// Config is immutable per Service (a swap builds a fresh Service), so
+		// reading it here without the lock is safe.
+		key := fingerprint(req.Task, s.config.Model, s.config.BaseURL, req.JSONMode, req.Messages)
+		if resp, ok := cache.Get(key); ok {
+			return resp, nil // cache hit — no provider call, no token charge
+		}
+		resp, err := a.Complete(ctx, req)
+		if err == nil {
+			cache.Put(key, resp)
+			s.reportUsage(ctx, req.Task, resp.TokensIn, resp.TokensOut)
+		}
+		return resp, err
+	}
+
 	resp, err := a.Complete(ctx, req)
 	if err == nil {
 		s.reportUsage(ctx, req.Task, resp.TokensIn, resp.TokensOut)

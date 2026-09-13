@@ -88,6 +88,8 @@ func main() {
 	gateway := aigateway.New(aiCfg, nil)
 	// Record per-month AI token usage (persisted in the settings store).
 	gateway.SetUsageSink(usage.New(store))
+	// Cache identical prompts to save tokens/latency on re-runs.
+	gateway.SetResponseCache(aigateway.NewResponseCache(0, 0))
 
 	// Semantic search (TR-19-E) vector index. Personal tier persists it to
 	// <DataDir>/vectors.db (SQLite) so the index survives restarts; it is
