@@ -137,6 +137,17 @@ export function DocSearch({ go }: { go: Go }) {
             )}
           </div>
 
+          {/* 自动比价表 (PRD): 将推荐供应商一键送入横向 CompareView。 */}
+          {result.results.length >= 2 && (
+            <button
+              className="btn-ghost"
+              onClick={() => go({ name: 'compare', ids: result.results.map((s) => s.id).slice(0, 8) })}
+              title="把排名靠前的推荐供应商放入横向比价表对比"
+            >
+              <Icon name="scales" size={15} /> 对比推荐供应商（生成比价表）
+            </button>
+          )}
+
           <div className="grid gap-3">
             {result.results.map((s) => {
               const pct = Math.round(Math.max(0, Math.min(1, s.score)) * 100)
