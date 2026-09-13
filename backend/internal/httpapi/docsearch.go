@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/supplider/supplider/backend/internal/aigateway"
@@ -263,11 +264,19 @@ func readDocSearchInput(w http.ResponseWriter, r *http.Request) (docSearchInput,
 			return docSearchInput{}, false
 		}
 
+		// top_k defaults to 10; the CLI (srm-cli analyze) passes it as a query
+		// param since the multipart body carries only the file. Non-positive or
+		// absent → default.
+		topK := 10
+		if v, err := strconv.Atoi(r.URL.Query().Get("top_k")); err == nil && v > 0 {
+			topK = v
+		}
+
 		text, err := documentextract.FromFile(raw, header.Header.Get("Content-Type"))
 		if err != nil {
 			switch {
 			case errors.Is(err, documentextract.ErrImage):
-				return docSearchInput{image: raw, imageMIME: header.Header.Get("Content-Type"), topK: 10}, true
+				return docSearchInput{image: raw, imageMIME: header.Header.Get("Content-Type"), topK: topK}, true
 			case errors.Is(err, documentextract.ErrUnsupported):
 				writeError(w, http.StatusUnsupportedMediaType, "暂不支持该文档格式（如 PDF）；请粘贴文本，或改用 .txt/.md/.docx/.xlsx/图片")
 				return docSearchInput{}, false
@@ -276,7 +285,7 @@ func readDocSearchInput(w http.ResponseWriter, r *http.Request) (docSearchInput,
 				return docSearchInput{}, false
 			}
 		}
-		return docSearchInput{text: text, topK: 10}, true
+		return docSearchInput{text: text, topK: topK}, true
 	}
 
 	var req docSearchRequest

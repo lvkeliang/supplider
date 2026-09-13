@@ -10,6 +10,8 @@
 //	srm-cli add <file.json|-> [--visibility N] [--owner user]
 //	srm-cli list [filters] [--limit N] [--cursor CURSOR] [--json]
 //	srm-cli search <keyword> [filters]   (FTS backend lands later; same flags)
+//	srm-cli analyze <doc.txt|docx|xlsx|图片|-> [--top N] [--json]
+//	                                         AI 文档分析搜索：提取需求 → 语义匹配推荐供应商
 //	srm-cli info <id> [--json]
 //	srm-cli export [--format json|xlsx] [--out file] [filters] [--include-archived]
 //	srm-cli backup [--out file.zip]        download a full library backup (db snapshot + attachments)
@@ -36,6 +38,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -66,6 +69,11 @@ func main() {
 		// For now search == list with a keyword; the FTS-backed search
 		// port lands next without changing this command's surface.
 		err = cmdSearch(args)
+	case "analyze":
+		// AI 文档分析搜索 (PRD: srm-cli analyze ./需求.docx): upload a
+		// requirement document, LLM extracts the requirement and the semantic
+		// index returns ranked supplier recommendations.
+		err = cmdAnalyze(args)
 	case "export":
 		err = cmdExport(args)
 	case "backup":
@@ -367,6 +375,138 @@ func cmdSearch(args []string) error {
 		cmdArgs = append([]string{"--q", kw}, cmdArgs...)
 	}
 	return cmdList(cmdArgs)
+}
+
+// analyzeResult is the CLI projection of POST /ai/doc-search.
+type analyzeResult struct {
+	Requirement struct {
+		Requirement  string `json:"requirement"`
+		Province     string `json:"province"`
+		City         string `json:"city"`
+		District     string `json:"district"`
+		Category     string `json:"category"`
+		MinQualLevel string `json:"min_qual_level"`
+	} `json:"requirement"`
+	Results []struct {
+		ID         string   `json:"id"`
+		Name       string   `json:"name"`
+		Province   string   `json:"province"`
+		City       string   `json:"city"`
+		District   string   `json:"district"`
+		Categories []string `json:"categories"`
+		TopQual    string   `json:"top_qual"`
+		Rating     float64  `json:"rating"`
+		Score      float64  `json:"score"`
+		Reason     string   `json:"reason"`
+	} `json:"results"`
+}
+
+// cmdAnalyze uploads a requirement document to the sidecar's AI doc-search and
+// prints the extracted requirement + ranked recommendations. Requires the
+// sidecar running AND an AI provider configured (embedding model for the
+// vector index). Text / .docx / .xlsx / 图片 supported; PDF → paste text.
+func cmdAnalyze(args []string) error {
+	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	top := fs.Int("top", 10, "max recommendations")
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: srm-cli analyze <doc.txt|docx|xlsx|图片|-> [--top N] [--json]")
+	}
+	path := fs.Arg(0)
+
+	var data []byte
+	var name string
+	if path == "-" {
+		d, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return err
+		}
+		data, name = d, "stdin.txt"
+	} else {
+		d, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		data, name = d, filepath.Base(path)
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("document is empty")
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", name)
+	if err != nil {
+		return err
+	}
+	if _, err := fw.Write(data); err != nil {
+		return err
+	}
+	if err := mw.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost,
+		apiBase()+"/api/v1/ai/doc-search?top_k="+fmt.Sprint(*top), &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+
+	var out analyzeResult
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+
+	r := out.Requirement
+	if r.Requirement != "" {
+		fmt.Printf("提取需求：%s\n", r.Requirement)
+	}
+	var tags []string
+	for _, t := range []string{r.Province, r.City, r.District, r.Category, r.MinQualLevel} {
+		if t != "" {
+			tags = append(tags, t)
+		}
+	}
+	if len(tags) > 0 {
+		fmt.Printf("维度：%s\n", strings.Join(tags, " · "))
+	}
+	if len(out.Results) == 0 {
+		fmt.Println("(未匹配到供应商；若向量索引为空，请先在应用内「重建索引」)")
+		return nil
+	}
+	fmt.Println()
+	fmt.Printf("推荐 %d 家：\n", len(out.Results))
+	for _, s := range out.Results {
+		loc := strings.TrimSpace(s.Province + " " + s.City + " " + s.District)
+		cat := ""
+		if len(s.Categories) > 0 {
+			cat = " [" + strings.Join(s.Categories, "/") + "]"
+		}
+		qual := s.TopQual
+		if qual != "" {
+			qual += "资质"
+		}
+		fmt.Printf("  %s  %-4.1f★  %-10s  %-8s%s  %s\n  %s\n",
+			s.ID, s.Rating, loc, qual, cat, s.Name, s.Reason)
+	}
+	return nil
 }
 
 func cmdList(args []string) error {

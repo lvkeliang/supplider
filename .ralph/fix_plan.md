@@ -84,6 +84,7 @@
 - [x] **TR-19-E 文档分析搜索 + 语义搜索**：文档上传+向量化存储；`Gateway.Embed()` 实现（bge-m3 模型）；文档分析推荐供应商。**阶段 5，5-7 天**——后端（Gateway.Embed + `vectorstore` 端口/memory+SQLite 持久化实现 + `POST /ai/index` + `/ai/semantic-search` + `/ai/doc-search` + 文档解析：文本/.docx/.xlsx 本地提取 + 图片 LLM vision）+ 前端（「AI 文档搜索」视图，入口按 `ai_doc_search`=CanEmbed 门控）+ `vectorfactory` 接线（personal=SQLite `vectors.db` 持久化、small_business/enterprise=memory 占位待 Qdrant/Milvus）——2026-09-13
 - [ ] **TR-19-E 补充：PDF 文本提取**：doc-search 已支持文本/.docx/.xlsx/图片；PDF 需纯 Go 提取库（如 `ledongthuc/pdf`，破坏零依赖需权衡）或自建解析。非 AI 替代：粘贴文本
 - [x] **TR-19 备注（小打磨，随相关改动顺手做）**：~~`compact()` 0 值问题（已修，见 P2 顶部 2026-09-10）~~；~~设置页本地偏好保存成功消息应 3-5 秒自动消失~~；~~合并重复按钮可改为"合并重复档案…"带省略号风格~~——2026-09-13
+- [x] **CLI analyze（PRD 明文命令 `srm-cli analyze ./需求.docx`）**：复用 `POST /ai/doc-search`（multipart、服务端 documentextract），CLI 命令行文档分析搜索——`analyze <file|-> [--top] [--json]`；doc-search 的 multipart 路径补 `top_k` 查询参；需 sidecar 运行 + AI 已配。基于 HTTP 复用后端全部逻辑、零重复——2026-09-14
 
 ## Medium Priority — 小企业版（验证期）
 
