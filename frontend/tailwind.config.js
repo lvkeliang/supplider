@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  // TR-17 暗色模式: class strategy — the `.dark` class on <html> (set by the
+  // inline no-flash script + the header toggle) drives every `dark:` variant.
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {

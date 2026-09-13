@@ -66,9 +66,9 @@ export function DocSearch({ go }: { go: Go }) {
   return (
     <div className="space-y-4">
       {/* Sticky title bar (TR-11 pattern) */}
-      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 bg-slate-50 px-4 py-2">
+      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 bg-slate-50 dark:bg-slate-900 px-4 py-2">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-slate-800">AI 文档搜索</h1>
+          <h1 className="text-xl font-semibold text-slate-800 dark:text-slate-100">AI 文档搜索</h1>
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={() => go({ name: 'list' })}>返回列表</button>
             <button
@@ -84,8 +84,8 @@ export function DocSearch({ go }: { go: Go }) {
       </div>
 
       {/* Input card */}
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <label className="mb-1 block text-sm font-medium text-slate-700">
+      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
+        <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
           粘贴需求文档内容
         </label>
         <textarea
@@ -116,7 +116,7 @@ export function DocSearch({ go }: { go: Go }) {
               e.target.value = ''
             }}
           />
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-slate-400 dark:text-slate-500">
             支持纯文本 / Word(.docx) / Excel(.xlsx) / 图片；PDF 请先粘贴文本。首次使用请先「重建索引」。
           </span>
         </div>
@@ -127,7 +127,7 @@ export function DocSearch({ go }: { go: Go }) {
         <div className="space-y-3">
           <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3">
             <div className="text-sm font-medium text-brand-800">提取的需求</div>
-            <p className="mt-1 text-sm text-slate-700">{req.requirement}</p>
+            <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">{req.requirement}</p>
             {reqTags.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
                 {reqTags.map((t) => (
@@ -144,15 +144,15 @@ export function DocSearch({ go }: { go: Go }) {
                 <div
                   key={s.id}
                   onClick={() => go({ name: 'detail', id: s.id })}
-                  className="cursor-pointer rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500 hover:shadow"
+                  className="cursor-pointer rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-left shadow-sm transition hover:border-brand-500 hover:shadow"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-800">{s.name}</span>
+                    <span className="font-medium text-slate-800 dark:text-slate-100">{s.name}</span>
                     <span className="ml-auto inline-flex items-center gap-0.5 text-sm text-amber-500">
                       <Icon name="star" size={13} filled /> {s.rating.toFixed(1)}
                     </span>
                   </div>
-                  <div className="mt-1 text-sm text-slate-500">
+                  <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                     {[s.province, s.city, s.district].filter(Boolean).join(' · ')}
                     {s.top_qual ? ` · ${s.top_qual}资质` : ''}
                   </div>
@@ -163,17 +163,17 @@ export function DocSearch({ go }: { go: Go }) {
                       ))}
                     </div>
                   )}
-                  <div className="mt-2 flex items-center gap-2 border-t border-slate-100 pt-2 text-xs">
+                  <div className="mt-2 flex items-center gap-2 border-t border-slate-100 dark:border-slate-800 pt-2 text-xs">
                     <span className="rounded-full bg-brand-100 px-2 py-0.5 font-medium text-brand-700">
                       {s.reason}
                     </span>
-                    <span className="text-slate-400">相似度 {pct}%</span>
+                    <span className="text-slate-400 dark:text-slate-500">相似度 {pct}%</span>
                   </div>
                 </div>
               )
             })}
             {result.results.length === 0 && (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-slate-400">
+              <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 p-8 text-center text-slate-400 dark:text-slate-500">
                 未匹配到供应商。可能是索引为空——请点击右上角「重建索引」后再试，或放宽需求中的地域/品类/资质条件。
               </div>
             )}

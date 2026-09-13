@@ -62,7 +62,7 @@ export function SettingsView({ go }: { go: Go }) {
         <button className="btn-ghost px-2 py-1 text-sm" onClick={() => go({ name: 'list' })}>
           ← 返回列表
         </button>
-        <h2 className="text-lg font-semibold text-slate-800">管理设置</h2>
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">管理设置</h2>
       </div>
 
       {error && (
@@ -72,17 +72,17 @@ export function SettingsView({ go }: { go: Go }) {
       )}
 
       <DocumentCard title="可见性策略（最高可见等级）" defaultOpen>
-        <p className="mb-3 text-sm text-slate-500">
+        <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
           收紧最高可见等级后，超出范围的供应商记录进入数据处置流程：
           <b>扫描不合规 → 通知录入者 → 缓冲期（默认 7 天）内可自行调整或申诉 → 超时自动降级到合规等级</b>。
           桌面端每次启动与运行中每 24 小时自动执行处置，无需人工操作。
         </p>
 
         <div className="flex flex-wrap items-end gap-4">
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
+          <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
             最高允许可见等级
             <select
-              className="rounded-md border border-slate-300 px-2 py-1.5"
+              className="rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1.5"
               value={maxLevel}
               disabled={busy || !policy}
               onChange={(e) => setMaxLevel(Number(e.target.value))}
@@ -94,13 +94,13 @@ export function SettingsView({ go }: { go: Go }) {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
+          <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
             缓冲期（天）
             <input
               type="number"
               min={1}
               max={90}
-              className="w-24 rounded-md border border-slate-300 px-2 py-1.5"
+              className="w-24 rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1.5"
               value={bufferDays}
               disabled={busy || !policy}
               onChange={(e) => setBufferDays(Math.max(1, Number(e.target.value) || 7))}
@@ -113,7 +113,7 @@ export function SettingsView({ go }: { go: Go }) {
             className={`rounded-full px-2.5 py-0.5 text-xs ${
               policy?.configured
                 ? 'bg-emerald-50 text-emerald-700'
-                : 'bg-slate-100 text-slate-500'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
             }`}
           >
             {policy?.configured ? '管理员策略已配置' : '当前为版本默认策略'}
@@ -226,7 +226,7 @@ function AIConfigCard() {
 
   return (
     <DocumentCard title="AI 模型（可选，自配模型）" defaultOpen>
-      <p className="mb-3 text-sm text-slate-500">
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
         配置后启用 AI 增强（OCR 录入 / Excel 智能映射 / 自然语言搜索）。兼容
         <b> OpenAI 格式</b>（DeepSeek / 通义 / GLM / Moonshot / Ollama）与
         <b> Anthropic 格式</b>（Claude / DeepSeek Anthropic 端点）。不配置时平台完全可用，
@@ -246,7 +246,7 @@ function AIConfigCard() {
             key={p.name}
             type="button"
             onClick={() => applyPreset(p)}
-            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-brand-500 hover:text-brand-600"
+            className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1 text-xs text-slate-600 dark:text-slate-300 hover:border-brand-500 hover:text-brand-600"
             title={`${p.base_url} · ${p.model}`}
           >
             {p.name}
@@ -319,10 +319,10 @@ function ShortcutsCard() {
       <ul className="space-y-1.5 text-sm">
         {rows.map(([keys, desc]) => (
           <li key={keys} className="flex items-center gap-3">
-            <kbd className="min-w-[9.5rem] rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs text-slate-700">
+            <kbd className="min-w-[9.5rem] rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-0.5 font-mono text-xs text-slate-700 dark:text-slate-200">
               {keys}
             </kbd>
-            <span className="text-slate-600">{desc}</span>
+            <span className="text-slate-600 dark:text-slate-300">{desc}</span>
           </li>
         ))}
       </ul>
@@ -396,11 +396,11 @@ function BackupRestoreCard() {
 
   return (
     <DocumentCard title="数据备份与迁移" defaultOpen>
-      <p className="mb-3 text-sm text-slate-500">
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
         一次下载完整库备份（<b>.zip</b>）：数据库一致性快照 + 全部附件文件，应用运行中也可安全导出。
         建议定期复制到网盘/移动硬盘。<b>换机迁移/恢复</b>：在新机器安装并打开一次应用后，
         在下方选择备份 zip 上传，校验通过后<b>完全退出并重新打开应用</b>即可；恢复前的现有数据会自动保留一份
-        <code className="rounded bg-slate-100 px-1">restore.rollback-*</code> 回退副本。
+        <code className="rounded bg-slate-100 dark:bg-slate-700 px-1">restore.rollback-*</code> 回退副本。
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-ghost" onClick={() => void downloadBackup()}>
@@ -511,26 +511,26 @@ function LocalPreferenceCard() {
 
   return (
     <DocumentCard title="本地供应商偏好（本地优先）" defaultOpen>
-      <p className="mb-3 text-sm text-slate-500">
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
         设置常驻地域后，<b>列表与搜索结果中本地供应商自动排到最前</b>，外地供应商仍然显示在后面
-        （只调整排序，不会筛选掉任何供应商）。CLI（<code className="rounded bg-slate-100 px-1">srm-cli list/search</code>）
+        （只调整排序，不会筛选掉任何供应商）。CLI（<code className="rounded bg-slate-100 dark:bg-slate-700 px-1">srm-cli list/search</code>）
         与 MCP 搜索同样生效；随数据库一起备份。
       </p>
       <div className="flex flex-wrap items-end gap-4">
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
+        <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
           省份（必填）
           <input
-            className="w-36 rounded-md border border-slate-300 px-2 py-1.5"
+            className="w-36 rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1.5"
             placeholder="如 浙江"
             value={province}
             disabled={busy}
             onChange={(e) => setProvince(e.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
+        <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
           城市（可选）
           <input
-            className="w-36 rounded-md border border-slate-300 px-2 py-1.5"
+            className="w-36 rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1.5"
             placeholder="如 杭州"
             value={city}
             disabled={busy}
@@ -548,7 +548,7 @@ function LocalPreferenceCard() {
         )}
         <span
           className={`rounded-full px-2.5 py-0.5 text-xs ${
-            pref?.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+            pref?.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
           }`}
         >
           {pref?.configured ? `已配置：${pref.province}${pref.city ? ` · ${pref.city}` : ''}` : '未配置'}

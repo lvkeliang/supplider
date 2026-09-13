@@ -70,7 +70,7 @@ export function NotificationBell({ go }: { go: Go }) {
           setOpen((o) => !o)
           void refresh()
         }}
-        className="relative rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+        className="relative rounded-md px-2 py-1 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-700"
         title="变更通知（关注的供应商）"
         aria-label="变更通知"
       >
@@ -83,9 +83,9 @@ export function NotificationBell({ go }: { go: Go }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-96 max-w-[92vw] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
-          <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-            <span className="text-sm font-semibold text-slate-700">变更通知</span>
+        <div className="absolute right-0 z-30 mt-2 w-96 max-w-[92vw] overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2">
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">变更通知</span>
             <button
               onClick={markAll}
               disabled={unread === 0}
@@ -96,13 +96,13 @@ export function NotificationBell({ go }: { go: Go }) {
           </div>
           <div className="max-h-[24rem] overflow-y-auto">
             {items.length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-slate-400">暂无通知</p>
+              <p className="px-3 py-6 text-center text-sm text-slate-400 dark:text-slate-500">暂无通知</p>
             ) : (
               items.map((n) => (
                 <button
                   key={n.id}
                   onClick={() => openItem(n)}
-                  className={`flex w-full gap-2 border-b border-slate-50 px-3 py-2 text-left hover:bg-slate-50 ${
+                  className={`flex w-full gap-2 border-b border-slate-50 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 ${
                     n.read ? '' : 'bg-blue-50/40'
                   }`}
                 >
@@ -111,14 +111,14 @@ export function NotificationBell({ go }: { go: Go }) {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium text-slate-800">{n.title}</span>
+                      <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{n.title}</span>
                       {!n.read && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />}
                     </span>
-                    <span className="block truncate text-xs text-slate-500">
+                    <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
                       {n.supplier_name}
                       {n.body ? ` — ${n.body}` : ''}
                     </span>
-                    <span className="block text-[11px] text-slate-400">
+                    <span className="block text-[11px] text-slate-400 dark:text-slate-500">
                       {formatTime(n.created_at)}
                     </span>
                   </span>

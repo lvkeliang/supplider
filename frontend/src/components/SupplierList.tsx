@@ -19,7 +19,7 @@ function severityTag(sev: string): { label: string; cls: string } {
     case 'medium':
       return { label: '中', cls: 'bg-orange-200 text-orange-900' }
     default:
-      return { label: '低', cls: 'bg-slate-200 text-slate-700' }
+      return { label: '低', cls: 'bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200' }
   }
 }
 
@@ -219,9 +219,9 @@ export function SupplierList({
       {/* Sticky band: title + search/filter stay under the global header
           while the long supplier list scrolls (TR-09). Page-bg fill hides
           rows passing underneath. */}
-      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 space-y-3 bg-slate-50 px-4 pb-3 pt-4">
+      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 space-y-3 bg-slate-50 dark:bg-slate-900 px-4 pb-3 pt-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">供应商</h1>
+        <h1 className="text-xl font-semibold text-slate-800 dark:text-slate-100">供应商</h1>
         <div className="flex gap-2">
           {aiDocSearch && (
             <button className="btn-ghost" onClick={() => go({ name: 'docsearch' })} title="上传或粘贴需求文档，AI 语义匹配推荐供应商">
@@ -244,7 +244,7 @@ export function SupplierList({
       </div>
 
       {/* Search + filters */}
-      <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 shadow-sm">
         <div className="relative mb-2">
           <input
             ref={searchInputRef}
@@ -274,7 +274,7 @@ export function SupplierList({
               aria-label={aiMode ? '切回普通搜索' : 'AI 自然语言搜索'}
               title={aiMode ? '切回普通关键词搜索' : '用一句话描述需求，AI 解析成筛选'}
               className={`absolute right-10 top-1/2 -translate-y-1/2 rounded px-1.5 text-xs font-semibold leading-5 ${
-                aiMode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-brand-600'
+                aiMode ? 'bg-brand-600 text-white' : 'text-slate-400 dark:text-slate-500 hover:text-brand-600'
               }`}
               onClick={() => setAiMode((m) => !m)}
             >
@@ -286,7 +286,7 @@ export function SupplierList({
               type="button"
               aria-label="清除搜索"
               title="清除"
-              className="absolute right-9 top-1/2 -translate-y-1/2 rounded px-1 leading-none text-slate-400 hover:text-slate-700"
+              className="absolute right-9 top-1/2 -translate-y-1/2 rounded px-1 leading-none text-slate-400 dark:text-slate-500 hover:text-slate-700"
               onClick={() => {
                 setQInput('')
                 if (aiMode) void runNLSearch('')
@@ -300,7 +300,7 @@ export function SupplierList({
             type="button"
             aria-label="搜索"
             title="搜索"
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-slate-500 hover:text-brand-600"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-slate-500 dark:text-slate-400 hover:text-brand-600"
             onClick={() => {
               if (aiMode) void runNLSearch(qInput)
               else debouncer.flush(() => applyQuery(qInput))
@@ -327,7 +327,7 @@ export function SupplierList({
             ))}
           </select>
         </div>
-        <div className="mt-2 flex items-center gap-4 text-sm text-slate-500">
+        <div className="mt-2 flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
           <label className="flex items-center gap-1">
             最低评分
             <select
@@ -483,7 +483,7 @@ export function SupplierList({
           <div
             key={s.id}
             onClick={() => go({ name: 'detail', id: s.id })}
-            className="cursor-pointer rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-500 hover:shadow"
+            className="cursor-pointer rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-left shadow-sm transition hover:border-brand-500 hover:shadow"
           >
             <div className="flex items-center gap-2">
               <input
@@ -494,7 +494,7 @@ export function SupplierList({
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => toggleSelected(s.id, e.target.checked)}
               />
-              <span className="font-medium text-slate-800">{s.name}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">{s.name}</span>
               {s.watched && (
                 <span
                   className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
@@ -538,7 +538,7 @@ export function SupplierList({
                 </span>
               )}
               {s.status === STATUS_ARCHIVED && (
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">已归档</span>
+                <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2 py-0.5 text-xs text-slate-500 dark:text-slate-400">已归档</span>
               )}
               {s.rating > 0 && (
                 <span className="ml-auto inline-flex items-center gap-0.5 text-sm text-amber-500">
@@ -546,7 +546,7 @@ export function SupplierList({
                 </span>
               )}
             </div>
-            <div className="mt-1 text-sm text-slate-500">
+            <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               {[s.province, s.city, s.district].filter(Boolean).join(' · ')}
               {s.top_qual ? ` · ${s.top_qual}资质` : ''}
             </div>
@@ -560,14 +560,14 @@ export function SupplierList({
           </div>
         ))}
         {!loading && items.length === 0 && !error && (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-slate-400">
+          <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 p-10 text-center text-slate-400 dark:text-slate-500">
             没有匹配的供应商，试试减少筛选条件，或点击右上角“新建供应商”。
           </div>
         )}
       </div>
 
       <div className="text-center">
-        {loading && <div className="py-3 text-sm text-slate-400">加载中…</div>}
+        {loading && <div className="py-3 text-sm text-slate-400 dark:text-slate-500">加载中…</div>}
         {!loading && cursor && (
           <button
             className="btn-ghost"
@@ -581,8 +581,8 @@ export function SupplierList({
       {/* 对比/比价浮动条：勾选供应商后出现，≥2 家可并排对比。 */}
       {selected.length > 0 && (
         <div className="sticky bottom-4 z-10 flex justify-center">
-          <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-lg">
-            <span className="text-sm text-slate-600">已选 {selected.length} 家</span>
+          <div className="flex items-center gap-3 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2 shadow-lg">
+            <span className="text-sm text-slate-600 dark:text-slate-300">已选 {selected.length} 家</span>
             <button
               className="btn-primary !rounded-full !py-1 text-sm"
               disabled={selected.length < 2}
@@ -591,7 +591,7 @@ export function SupplierList({
             >
               <Icon name="scales" size={15} /> 开始对比
             </button>
-            <button className="text-sm text-slate-400 hover:text-slate-600" onClick={() => setSelected([])}>
+            <button className="text-sm text-slate-400 dark:text-slate-500 hover:text-slate-600" onClick={() => setSelected([])}>
               清空
             </button>
           </div>

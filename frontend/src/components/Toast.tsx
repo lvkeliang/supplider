@@ -102,17 +102,17 @@ const KIND_STYLE: Record<ToastKind, { bar: string; icon: IconName; cls: string }
   success: {
     bar: 'bg-emerald-500',
     icon: 'check',
-    cls: 'border-emerald-200 bg-white text-emerald-800',
+    cls: 'border-emerald-200 bg-white dark:bg-slate-800 text-emerald-800',
   },
   error: {
     bar: 'bg-red-500',
     icon: 'x',
-    cls: 'border-red-200 bg-white text-red-800',
+    cls: 'border-red-200 bg-white dark:bg-slate-800 text-red-800',
   },
   info: {
     bar: 'bg-brand-500',
     icon: 'info',
-    cls: 'border-slate-200 bg-white text-slate-700',
+    cls: 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200',
   },
 }
 
@@ -135,7 +135,7 @@ function ToastBubble({ toast, onClose }: { toast: ToastItem; onClose: () => void
       <button
         type="button"
         onClick={onClose}
-        className="shrink-0 text-slate-400 hover:text-slate-600"
+        className="shrink-0 text-slate-400 dark:text-slate-500 hover:text-slate-600"
         aria-label="关闭"
       >
         <Icon name="x" size={14} />

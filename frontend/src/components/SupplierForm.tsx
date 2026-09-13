@@ -319,15 +319,15 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
 
   const cancel = () => go(editing && id ? { name: 'detail', id } : { name: 'list' })
 
-  if (loading) return <div className="py-10 text-center text-slate-400">加载中…</div>
+  if (loading) return <div className="py-10 text-center text-slate-400 dark:text-slate-500">加载中…</div>
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       {/* Sticky title bar with cancel/save + section anchor chips
           reachable while the long form scrolls (TR-11/TR-13). */}
-      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 bg-slate-50 px-4 py-2">
+      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 bg-slate-50 dark:bg-slate-900 px-4 py-2">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-slate-800">{editing ? '编辑供应商' : '新建供应商'}</h1>
+          <h1 className="text-xl font-semibold text-slate-800 dark:text-slate-100">{editing ? '编辑供应商' : '新建供应商'}</h1>
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={cancel}>取消</button>
             <button className="btn-primary" disabled={saving} onClick={submit}>
@@ -344,7 +344,7 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
               className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs transition-colors ${
                 activeSection === s.id
                   ? 'bg-brand-600 text-white'
-                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                  : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
               }`}
             >
               {s.label}
@@ -374,7 +374,7 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
                 <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => go({ name: 'detail', id: d.supplier_id })}>
                   <span className={`rounded-full px-2 py-0.5 text-xs ${
                     d.level === 'strong' ? 'bg-red-200 text-red-900'
-                      : d.level === 'possible' ? 'bg-slate-200 text-slate-700'
+                      : d.level === 'possible' ? 'bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200'
                         : 'bg-amber-200 text-amber-900'}`}>
                     {d.level === 'strong' ? '确凿·信用代码一致'
                       : d.level === 'possible' ? '近似·名称相近'
@@ -398,9 +398,9 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
       )}
 
       {/* 基本信息 */}
-      <section id="form-sec-basic" className="form-section space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-basic" className="form-section space-y-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">基本信息</h2>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">基本信息</h2>
           {aiOCR && (
             <>
               <input
@@ -514,8 +514,8 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
 
       {/* 联系方式 — 联系人/电话是合作前尽调与日常联系的核心字段，也用于
           空壳检测 R202（缺联系人/电话会被标记）。 */}
-      <section id="form-sec-contact" className="form-section space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700">联系方式</h2>
+      <section id="form-sec-contact" className="form-section space-y-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">联系方式</h2>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">联系人</label>
@@ -546,8 +546,8 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
       </section>
 
       {/* 地域（省/市/区县级联，避免错字破坏本地优先排序；支持整段粘贴拆分） */}
-      <section id="form-sec-region" className="form-section space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700">地域 *（本地供应商偏好）</h2>
+      <section id="form-sec-region" className="form-section space-y-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">地域 *（本地供应商偏好）</h2>
         <input
           className="input"
           placeholder="可粘贴整段地址自动拆分，如：浙江省杭州市西湖区文三路…"
@@ -619,16 +619,16 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
       </section>
 
       {/* 品类 */}
-      <section id="form-sec-categories" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700">品类标签</h2>
+      <section id="form-sec-categories" className="form-section space-y-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">品类标签</h2>
         <input className="input" placeholder="多个品类用逗号分隔，如 施工服务, 市政工程"
           value={form.categoriesText} onChange={(e) => setForm((f) => ({ ...f, categoriesText: e.target.value }))} />
       </section>
 
       {/* 资质 */}
-      <section id="form-sec-qualifications" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-qualifications" className="form-section space-y-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">资质证书</h2>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">资质证书</h2>
           <button className="btn-ghost !py-1 text-xs"
             onClick={() => setForm((f) => ({ ...f, quals: [...f.quals, { type: '' }] }))}>＋ 添加资质</button>
         </div>
@@ -652,9 +652,9 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
       </section>
 
       {/* 产品/服务 */}
-      <section id="form-sec-products" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-products" className="form-section space-y-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">产品 / 服务</h2>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">产品 / 服务</h2>
           <button className="btn-ghost !py-1 text-xs"
             onClick={() => setForm((f) => ({ ...f, products: [...f.products, { name: '' }] }))}>＋ 添加</button>
         </div>
@@ -673,17 +673,17 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
       </section>
 
       {/* 绩效 */}
-      <section id="form-sec-performance" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-performance" className="form-section space-y-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">合作 / 绩效记录</h2>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">合作 / 绩效记录</h2>
           <button className="btn-ghost !py-1 text-xs"
             onClick={() => setForm((f) => ({ ...f, perfs: [...f.perfs, { project: '', score: 0 }] }))}>＋ 添加</button>
         </div>
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-400 dark:text-slate-500">
           总评分可直接填写（0–5）；也可只填交付/质量/配合度三维，系统按三维均值计入综合评分。
         </p>
         {form.perfs.map((p, i) => (
-          <div key={i} className="space-y-2 rounded-md border border-slate-100 p-2">
+          <div key={i} className="space-y-2 rounded-md border border-slate-100 dark:border-slate-800 p-2">
             <div className="flex gap-2">
               <input className="input flex-1" placeholder="项目名称" value={p.project}
                 onChange={(e) => setForm((f) => updateArr(f, 'perfs', i, { project: e.target.value }))} />
@@ -699,7 +699,7 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
                 ['quality', '质量'],
                 ['cooperation', '配合度'],
               ] as const).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-1 text-xs text-slate-500">
+                <label key={key} className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
                   {label}
                   <input className="input w-16" type="number" step="0.1" min="0" max="5" placeholder="0-5"
                     value={p[key] || ''}
@@ -714,11 +714,11 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
       </section>
 
       {/* 自定义字段 — 自由扩展,不预定义 */}
-      <section id="form-sec-custom" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="form-sec-custom" className="form-section space-y-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-slate-700">自定义字段</h2>
-            <p className="text-xs text-slate-400">按行业自由记录：施工商可记“垫资能力/设备”，贸易商可记“品牌/规格”。</p>
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">自定义字段</h2>
+            <p className="text-xs text-slate-400 dark:text-slate-500">按行业自由记录：施工商可记“垫资能力/设备”，贸易商可记“品牌/规格”。</p>
           </div>
           <button className="btn-ghost !py-1 text-xs"
             onClick={() => setForm((f) => ({ ...f, custom: [...f.custom, { key: '', kind: 'text', value: '' }] }))}>
@@ -753,8 +753,8 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
       </section>
 
       {/* 可见性 */}
-      <section id="form-sec-visibility" className="form-section space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700">可见性</h2>
+      <section id="form-sec-visibility" className="form-section space-y-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">可见性</h2>
         <select className="input max-w-xs" value={form.visibility}
           onChange={(e) => setForm((f) => ({ ...f, visibility: Number(e.target.value) }))}>
           {Array.from({ length: visibilityLevels }, (_, i) => (
@@ -762,7 +762,7 @@ export function SupplierForm({ go, id, visibilityLevels, aiOCR = false }: { go: 
           ))}
         </select>
         {!editing && (
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-400 dark:text-slate-500">
             录入者标识（个人版可留空，默认为本机用户）：
             <input className="input mt-1 max-w-xs" value={form.owner}
               onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))} />

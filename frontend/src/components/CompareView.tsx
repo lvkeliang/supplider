@@ -46,7 +46,7 @@ export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
       </div>
     )
   }
-  if (!docs) return <div className="py-10 text-center text-slate-400">加载中…</div>
+  if (!docs) return <div className="py-10 text-center text-slate-400 dark:text-slate-500">加载中…</div>
 
   const rows: { label: string; render: (d: Supplier) => ReactNode; best?: (d: Supplier) => number }[] = [
     {
@@ -114,15 +114,15 @@ export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
   return (
     <div className="space-y-3">
       <Back go={go} />
-      <h2 className="text-lg font-semibold text-slate-800">供应商对比（{docs.length} 家）</h2>
+      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">供应商对比（{docs.length} 家）</h2>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr>
-              <th className="w-28 border-b border-slate-200 bg-slate-50 p-2 text-left text-xs font-medium text-slate-500">维度</th>
+              <th className="w-28 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400">维度</th>
               {docs.map((d) => (
-                <th key={d.id} className="border-b border-l border-slate-200 p-2 text-left align-top">
+                <th key={d.id} className="border-b border-l border-slate-200 dark:border-slate-700 p-2 text-left align-top">
                   <button
                     className="font-semibold text-brand-700 hover:underline"
                     onClick={() => go({ name: 'detail', id: d.id })}
@@ -139,11 +139,11 @@ export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
               const best = r.best ? bestOf(r.best) : 0
               return (
                 <tr key={r.label} className="align-top">
-                  <td className="border-b border-slate-100 bg-slate-50/60 p-2 text-xs text-slate-500">{r.label}</td>
+                  <td className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 p-2 text-xs text-slate-500 dark:text-slate-400">{r.label}</td>
                   {docs.map((d) => {
                     const isBest = r.best && best > 0 && r.best(d) === best
                     return (
-                      <td key={d.id} className={`border-b border-l border-slate-100 p-2 ${isBest ? 'bg-amber-50' : ''}`}>
+                      <td key={d.id} className={`border-b border-l border-slate-100 dark:border-slate-800 p-2 ${isBest ? 'bg-amber-50' : ''}`}>
                         {r.render(d)}
                       </td>
                     )
@@ -154,7 +154,7 @@ export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-slate-400 dark:text-slate-500">
         点击公司名可进入完整档案（资质明细、附件、绩效记录、风险信号逐条说明）。评分来自绩效记录：总评优先，否则取交付/质量/配合度均值。
       </p>
     </div>
@@ -163,7 +163,7 @@ export function CompareView({ ids, go }: { ids: string[]; go: Go }) {
 
 function Back({ go }: { go: Go }) {
   return (
-    <button className="text-sm text-slate-400 hover:text-slate-600" onClick={() => go({ name: 'list' })}>
+    <button className="text-sm text-slate-400 dark:text-slate-500 hover:text-slate-600" onClick={() => go({ name: 'list' })}>
       ← 返回列表
     </button>
   )

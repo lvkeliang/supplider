@@ -15,7 +15,7 @@ function sevStyle(sev: string): { cls: string; label: string } {
     case 'medium':
       return { cls: 'bg-orange-100 text-orange-700', label: '中' }
     default:
-      return { cls: 'bg-slate-100 text-slate-600', label: '低' }
+      return { cls: 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300', label: '低' }
   }
 }
 
@@ -24,8 +24,8 @@ function SignalRow({ sig }: { sig: RiskSignal }) {
   return (
     <li className="flex items-start gap-2 text-sm">
       <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs ${s.cls}`}>{s.label}</span>
-      <span className="font-mono text-xs text-slate-400">{sig.code}</span>
-      <span className="text-slate-700">{sig.message}</span>
+      <span className="font-mono text-xs text-slate-400 dark:text-slate-500">{sig.code}</span>
+      <span className="text-slate-700 dark:text-slate-200">{sig.message}</span>
     </li>
   )
 }
@@ -286,7 +286,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
   }
 
   if (error) return <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
-  if (!doc) return <div className="py-10 text-center text-slate-400">加载中…</div>
+  if (!doc) return <div className="py-10 text-center text-slate-400 dark:text-slate-500">加载中…</div>
 
   const b = doc.basic_info
   const archived = doc.status === STATUS_ARCHIVED
@@ -297,17 +297,17 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
     <div className="mx-auto max-w-3xl space-y-3">
       {/* Sticky header: title + lifecycle actions stay under the global
           header while the document cards scroll (TR-10). */}
-      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 bg-slate-50 px-4 pb-2 pt-4">
+      <div className="sticky top-[57px] z-40 -mx-4 -mt-6 bg-slate-50 dark:bg-slate-900 px-4 pb-2 pt-4">
       <div className="flex items-start gap-3">
         <div>
-          <button className="text-sm text-slate-400 hover:text-slate-600" onClick={() => go({ name: 'list' })}>
+          <button className="text-sm text-slate-400 dark:text-slate-500 hover:text-slate-600" onClick={() => go({ name: 'list' })}>
             ← 返回列表
           </button>
-          <h1 className="mt-1 text-xl font-semibold text-slate-800">
+          <h1 className="mt-1 text-xl font-semibold text-slate-800 dark:text-slate-100">
             {b.company_name}
-            {archived && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">已归档</span>}
+            {archived && <span className="ml-2 rounded-full bg-slate-100 dark:bg-slate-700 px-2 py-0.5 text-xs text-slate-500 dark:text-slate-400">已归档</span>}
           </h1>
-          <div className="mt-1 text-sm text-slate-500">
+          <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             {[b.region.province, b.region.city, b.region.district].filter(Boolean).join(' · ')}
             {doc.rating ? (
               <span className="ml-3 inline-flex items-center gap-0.5 text-amber-500">
@@ -352,21 +352,21 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
 
       {/* 合并重复档案选择器：查重候选 + 手动 id 兜底 */}
       {mergeOpen && (
-        <div className="rounded-lg border border-slate-300 bg-white px-4 py-3">
+        <div className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 py-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-800">选择要并入的重复档案</h3>
-            <button className="text-sm text-slate-400 hover:text-slate-600" onClick={() => setMergeOpen(false)}>
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">选择要并入的重复档案</h3>
+            <button className="text-sm text-slate-400 dark:text-slate-500 hover:text-slate-600" onClick={() => setMergeOpen(false)}>
               取消
             </button>
           </div>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             按当前档案的公司名/信用代码查重；并入后对方的绩效/附件/资质/品类/自定义字段合并到本档案，对方归档（不可撤销）。
           </p>
 
           {mergeCandidates === null ? (
-            <p className="py-3 text-center text-sm text-slate-400">正在查重…</p>
+            <p className="py-3 text-center text-sm text-slate-400 dark:text-slate-500">正在查重…</p>
           ) : mergeCandidates.length === 0 ? (
-            <p className="py-3 text-sm text-slate-500">
+            <p className="py-3 text-sm text-slate-500 dark:text-slate-400">
               未查到疑似重复档案。如确需合并，可在下方手动输入对方档案 id（sup_ 开头）。
             </p>
           ) : (
@@ -382,13 +382,13 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                   <li key={m.supplier_id} className="flex items-center gap-3 py-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="truncate text-sm font-medium text-slate-800">{m.name}</span>
+                        <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{m.name}</span>
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs ${
                             m.level === 'strong'
                               ? 'bg-red-50 text-red-700'
                               : m.level === 'possible'
-                                ? 'bg-slate-100 text-slate-600'
+                                ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
                                 : 'bg-amber-50 text-amber-700'
                           }`}
                         >
@@ -402,10 +402,10 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                           <span className="inline-flex items-center gap-0.5 rounded-full bg-red-600 px-2 py-0.5 text-xs text-white"><Icon name="ban" size={11} /> 黑名单</span>
                         )}
                         {m.status === STATUS_ARCHIVED && (
-                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600">已归档</span>
+                          <span className="rounded-full bg-slate-200 dark:bg-slate-600 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-300">已归档</span>
                         )}
                       </div>
-                      <div className="mt-0.5 truncate text-xs text-slate-400">
+                      <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">
                         <span className="font-mono">{m.supplier_id}</span>
                         {m.province || m.city ? (
                           <span> · {[m.province, m.city].filter(Boolean).join(' ')}</span>
@@ -414,7 +414,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                       </div>
                     </div>
                     {blocked ? (
-                      <span className="shrink-0 text-xs text-slate-400" title={blocked}>
+                      <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500" title={blocked}>
                         不可合并
                       </span>
                     ) : (
@@ -434,9 +434,9 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
           )}
 
           {/* 兜底：查重未覆盖时手动输入 id */}
-          <div className="mt-2 flex items-center gap-2 border-t border-slate-100 pt-2">
+          <div className="mt-2 flex items-center gap-2 border-t border-slate-100 dark:border-slate-800 pt-2">
             <input
-              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              className="min-w-0 flex-1 rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1 text-sm"
               placeholder="手动输入重复档案 id（sup_ 开头）"
               value={mergeManualId}
               onChange={(e) => setMergeManualId(e.target.value)}
@@ -547,11 +547,11 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                 <SignalRow key={`${sig.code}-${i}`} sig={sig} />
               ))}
             </ul>
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
               以上为本地规则自动检测结果（信用代码校验位 / 成立时长 / 资料完整度 / 资质 / 注册资本等），仅供人工审核参考，不会阻断录入。
             </p>
             {flagged && !reviewed && !archived && (
-              <div className="mt-3 flex gap-2 border-t border-slate-100 pt-3">
+              <div className="mt-3 flex gap-2 border-t border-slate-100 dark:border-slate-800 pt-3">
                 <button className="btn-primary" disabled={reviewing} onClick={() => reviewRisk('verified')}>
                   {reviewing ? '处理中…' : <span className="inline-flex items-center gap-1"><Icon name="check" size={15} strokeWidth={3} /> 已核验（查验原件，正规）</span>}
                 </button>
@@ -585,7 +585,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
         {(doc.qualifications?.length ?? 0) === 0 ? <Empty text="暂无资质记录" /> : (
           <div className="space-y-2">
             {doc.qualifications!.map((q, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border border-slate-100 px-3 py-2 text-sm">
+              <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border border-slate-100 dark:border-slate-800 px-3 py-2 text-sm">
                 <span className="font-medium">{q.type}</span>
                 {q.level && <span className="chip">{q.level}</span>}
                 {q.verified && (
@@ -593,7 +593,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                     <Icon name="check" size={12} strokeWidth={3} /> 已核验
                   </span>
                 )}
-                <span className="ml-auto text-xs text-slate-400">
+                <span className="ml-auto text-xs text-slate-400 dark:text-slate-500">
                   {[q.cert_no, q.issuer, q.expiry ? `到期 ${q.expiry}` : ''].filter(Boolean).join(' · ')}
                 </span>
               </div>
@@ -615,11 +615,11 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
         {(doc.products_services?.length ?? 0) === 0 ? <Empty text="暂无产品/服务记录" /> : (
           <div className="space-y-2">
             {doc.products_services!.map((p, i) => (
-              <div key={i} className="rounded-md border border-slate-100 px-3 py-2 text-sm">
+              <div key={i} className="rounded-md border border-slate-100 dark:border-slate-800 px-3 py-2 text-sm">
                 <div className="font-medium">{p.name}
-                  {p.unit_price_range && <span className="ml-2 text-xs text-slate-400">{p.unit_price_range}</span>}
+                  {p.unit_price_range && <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{p.unit_price_range}</span>}
                 </div>
-                {p.desc && <div className="text-slate-500">{p.desc}</div>}
+                {p.desc && <div className="text-slate-500 dark:text-slate-400">{p.desc}</div>}
               </div>
             ))}
           </div>
@@ -631,7 +631,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
         {(doc.performance_history?.length ?? 0) === 0 ? <Empty text="暂无绩效记录" /> : (
           <div className="space-y-2">
             {doc.performance_history!.map((p, i) => (
-              <div key={i} className="rounded-md border border-slate-100 px-3 py-2 text-sm">
+              <div key={i} className="rounded-md border border-slate-100 dark:border-slate-800 px-3 py-2 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{p.project}</span>
                   {p.score ? (
@@ -639,16 +639,16 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                       <Icon name="star" size={13} filled /> {p.score}
                     </span>
                   ) : null}
-                  <span className="ml-auto text-xs text-slate-400">{p.date}</span>
+                  <span className="ml-auto text-xs text-slate-400 dark:text-slate-500">{p.date}</span>
                 </div>
                 {(p.delivery || p.quality || p.cooperation) && (
-                  <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-600">
+                  <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
                     {p.delivery ? <span>交付 <b className="text-amber-600">{p.delivery}</b></span> : null}
                     {p.quality ? <span>质量 <b className="text-amber-600">{p.quality}</b></span> : null}
                     {p.cooperation ? <span>配合度 <b className="text-amber-600">{p.cooperation}</b></span> : null}
                   </div>
                 )}
-                {p.feedback && <div className="mt-0.5 text-slate-500">{p.feedback}</div>}
+                {p.feedback && <div className="mt-0.5 text-slate-500 dark:text-slate-400">{p.feedback}</div>}
               </div>
             ))}
           </div>
@@ -683,7 +683,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                 }}
               />
             </label>
-            <span className="ml-2 text-xs text-slate-400">合同 / 资质扫描件 / 营业执照等</span>
+            <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">合同 / 资质扫描件 / 营业执照等</span>
           </div>
         )}
         {(doc.attachments?.length ?? 0) === 0 ? (
@@ -699,7 +699,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
                 >
                   {a.name}
                 </button>
-                <span className="text-xs text-slate-400">{(a.size / 1024).toFixed(0)} KB</span>
+                <span className="text-xs text-slate-400 dark:text-slate-500">{(a.size / 1024).toFixed(0)} KB</span>
                 {!archived && (
                   <button
                     className="ml-auto text-xs text-red-500 hover:text-red-700"
@@ -722,13 +722,13 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
           <ol className="space-y-1.5 text-sm">
             {[...(doc.change_log ?? [])].reverse().map((c, i) => (
               <li key={i} className="flex flex-wrap items-baseline gap-2">
-                <span className="text-xs text-slate-400">{new Date(c.date).toLocaleString('zh-CN')}</span>
+                <span className="text-xs text-slate-400 dark:text-slate-500">{new Date(c.date).toLocaleString('zh-CN')}</span>
                 <span className="font-mono text-xs text-brand-700">{c.field}</span>
-                <span className="text-slate-500">
+                <span className="text-slate-500 dark:text-slate-400">
                   {c.old !== undefined && c.old !== null && c.old !== '' ? `${stringify(c.old)} → ` : ''}
                   {stringify(c.new)}
                 </span>
-                <span className="ml-auto text-xs text-slate-400">{c.source}</span>
+                <span className="ml-auto text-xs text-slate-400 dark:text-slate-500">{c.source}</span>
               </li>
             ))}
           </ol>
@@ -741,7 +741,7 @@ export function SupplierDetail({ id, go }: { id: string; go: Go }) {
 }
 
 function Empty({ text }: { text: string }) {
-  return <p className="text-sm text-slate-400">{text}</p>
+  return <p className="text-sm text-slate-400 dark:text-slate-500">{text}</p>
 }
 
 function formatCustom(v: unknown): string {

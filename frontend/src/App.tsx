@@ -12,6 +12,7 @@ import { CompareView } from './components/CompareView'
 import { NotificationBell } from './components/NotificationBell'
 import { Logo } from './components/Logo'
 import { Icon } from './components/Icon'
+import { useDarkMode } from './theme'
 
 // Minimal in-app router (no extra dependency): the desktop MVP has a handful
 // of screens. Tauri/web history is not needed for the seed milestone.
@@ -58,6 +59,8 @@ export default function App() {
   const [features, setFeatures] = useState<Features | null>(null)
   const [gateKey, setGateKey] = useState(0)
   const [retryNonce, setRetryNonce] = useState(0)
+  // TR-17 暗色模式: persisted + OS-following; toggled from the header.
+  const [dark, toggleDark] = useDarkMode()
 
   // become-online poller: the bounded cold-start gate and the unbounded
   // mid-session reconnect loop share one implementation.
@@ -206,35 +209,44 @@ export default function App() {
     // gateKey remounts the whole business tree when a lost session returns,
     // forcing every view (and the bell) to refetch from scratch.
     <div className="min-h-screen" key={gateKey}>
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <button
             onClick={() => go({ name: 'list' })}
-            className="flex items-center gap-2 text-lg font-semibold text-slate-800"
+            className="flex items-center gap-2 text-lg font-semibold text-slate-800 dark:text-slate-100"
           >
             <Logo size={32} />
             Supplider
           </button>
-          <span className="text-sm text-slate-400">供应商资源管理</span>
+          <span className="text-sm text-slate-400 dark:text-slate-500">供应商资源管理</span>
           <div className="ml-auto flex items-center gap-2">
             {/* 变更通知：关注供应商的风险/黑名单/归档/资质临期提醒。 */}
             <NotificationBell go={go} />
+            {/* TR-17 暗色模式开关：跟随系统初始，之后手动切换并记忆。 */}
+            <button
+              onClick={toggleDark}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              title={dark ? '切换到浅色模式' : '切换到暗色模式'}
+              aria-label="切换深色/浅色主题"
+            >
+              <Icon name={dark ? 'sun' : 'moon'} size={16} />
+            </button>
             {/* 管理设置：可见性策略等管理员配置（个人版单用户即管理员）。 */}
             <button
               onClick={() => go({ name: 'settings' })}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               title="管理设置（可见性策略）"
             >
               <Icon name="settings" size={16} /> 设置
             </button>
             {features && (
-              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">
+              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                 {TIER_LABELS[features.tier] ?? features.tier}
               </span>
             )}
             {/* AI 入口只在后端报告 ai_enabled 时出现（无 Key 时整个隐藏，平台 100% 可用）。 */}
             {features?.ai_enabled && (
-              <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs text-emerald-700">
+              <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
                 AI 增强已启用
               </span>
             )}

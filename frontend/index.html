@@ -12,6 +12,21 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // TR-17: set the dark class before the bundle loads to avoid a light
+      // flash on dark-preference users. Mirrors src/theme.ts resolveDark().
+      ;(function () {
+        try {
+          var s = localStorage.getItem('supplider.theme')
+          var dark =
+            s === 'dark' ||
+            (s !== 'light' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {}
+      })()
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

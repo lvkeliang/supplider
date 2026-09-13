@@ -49,12 +49,12 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-lg bg-red-50 text-2xl text-red-500">
               !
             </div>
-            <h1 className="text-base font-semibold text-slate-800">页面出现了一点问题</h1>
-            <p className="mt-1.5 text-sm text-slate-500">
+            <h1 className="text-base font-semibold text-slate-800 dark:text-slate-100">页面出现了一点问题</h1>
+            <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
               数据保存在本地不会丢失。可以重试当前页面；若反复出现，请重启应用。
             </p>
             {this.state.error.message && (
-              <pre className="mt-3 max-h-32 overflow-auto rounded-md bg-slate-50 p-2 text-left text-xs text-slate-500">
+              <pre className="mt-3 max-h-32 overflow-auto rounded-md bg-slate-50 dark:bg-slate-800 p-2 text-left text-xs text-slate-500 dark:text-slate-400">
                 {this.state.error.message}
               </pre>
             )}
