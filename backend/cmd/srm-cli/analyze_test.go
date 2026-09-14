@@ -136,3 +136,35 @@ func TestCmdAuditLists(t *testing.T) {
 		t.Fatalf("audit output missing action/name:\n%s", buf.String())
 	}
 }
+
+// TestCmdAIUsagePrintsSpend: a fake sidecar serves /api/v1/ai/usage; the CLI
+// prints the monthly call + token totals.
+func TestCmdAIUsagePrintsSpend(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"month":"2026-09","total":{"calls":3,"tokens_in":450,"tokens_out":90},"by_task":{"summarize":{"calls":2,"tokens_in":250,"tokens_out":50}}}`))
+	}))
+	defer srv.Close()
+	orig := os.Getenv("SRM_API_ADDR")
+	_ = os.Setenv("SRM_API_ADDR", srv.URL)
+	defer os.Setenv("SRM_API_ADDR", orig)
+
+	old := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	err := cmdAIUsage([]string{})
+	_ = pw.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "3 次") || !strings.Contains(buf.String(), "450") || !strings.Contains(buf.String(), "90") {
+		t.Fatalf("aiusage output missing totals:\n%s", buf.String())
+	}
+}

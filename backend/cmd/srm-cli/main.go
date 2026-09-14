@@ -23,6 +23,7 @@
 //	srm-cli review <id> [--dismiss] [--by user] [--note ...]
 //	                                         人工审核闭环：标记已核验(默认)或误报忽略，清出审核队列
 //	srm-cli audit [--limit N] [--json]      操作审计日志：跨供应商生命周期轨迹的最新条目
+//	srm-cli aiusage                         本月 AI token 用量（自配 Key 成本可见）
 //	srm-cli blacklist <id> [--reason ...] / srm-cli unblacklist <id>
 //	                                         黑名单（淘汰/禁用）：列入仍可搜到但醒目标记，移出恢复在库
 //	srm-cli visibility [policy] [--enforce] [--max-level N] [--buffer-days N] [--json]
@@ -78,6 +79,9 @@ func main() {
 	case "audit":
 		// 操作审计日志：跨供应商生命周期轨迹（创建/修改/归档/黑名单/合并/导出）。
 		err = cmdAudit(args)
+	case "aiusage", "ai":
+		// 本月 AI token 用量（自配 Key 成本可见）。
+		err = cmdAIUsage(args)
 	case "analyze":
 		// AI 文档分析搜索 (PRD: srm-cli analyze ./需求.docx): upload a
 		// requirement document, LLM extracts the requirement and the semantic
@@ -464,6 +468,57 @@ func cmdAudit(args []string) error {
 			t = tt.Local().Format("01-02 15:04")
 		}
 		fmt.Printf("  %-14s  %-10s  %s\n", t, label, name)
+	}
+	return nil
+}
+
+// cmdAIUsage reports the current month's AI token usage (GET /api/v1/ai/usage)
+// — 自配 Key 用户可监控成本，脚本/后台可轮询。
+func cmdAIUsage(args []string) error {
+	fs := flag.NewFlagSet("aiusage", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit raw JSON")
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return err
+	}
+
+	resp, err := http.Get(apiBase() + "/api/v1/ai/usage")
+	if err != nil {
+		return fmt.Errorf("contact API (is suppliderd running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return decodeAPIError(resp)
+	}
+
+	var out struct {
+		Month string `json:"month"`
+		Total struct {
+			Calls     int `json:"calls"`
+			TokensIn  int `json:"tokens_in"`
+			TokensOut int `json:"tokens_out"`
+		} `json:"total"`
+		ByTask map[string]struct {
+			Calls     int `json:"calls"`
+			TokensIn  int `json:"tokens_in"`
+			TokensOut int `json:"tokens_out"`
+		} `json:"by_task"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	fmt.Printf("%s 本月 AI 用量：\n", out.Month)
+	fmt.Printf("  调用 %d 次 · tokens in %d · out %d\n", out.Total.Calls, out.Total.TokensIn, out.Total.TokensOut)
+	if len(out.ByTask) > 0 {
+		fmt.Println("  按任务：")
+		for task, c := range out.ByTask {
+			fmt.Printf("    %-12s %d 次 · %d in / %d out\n", task, c.Calls, c.TokensIn, c.TokensOut)
+		}
 	}
 	return nil
 }

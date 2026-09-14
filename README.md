@@ -94,6 +94,7 @@ srm-cli duplicates --name 某某公司      # 录入前查重
 srm-cli ainl "杭州本地二级市政商砼"     # AI 自然语言搜索（需已配模型）
 srm-cli analyze ./需求.docx             # AI 文档分析：提取需求→推荐供应商
 srm-cli audit [--limit N]               # 操作审计日志（创建/归档/黑名单/合并/导出）
+srm-cli aiusage                         # 本月 AI token 用量（calls / in / out + 按任务）
 srm-cli merge <保留id> <并入id>         # 合并重复档案（后者归档）
 srm-cli blacklist <id> --reason 造假     # 黑名单（淘汰）/ unblacklist
 srm-cli visibility policy --max-level 0 # 收紧可见性策略并立即处置
