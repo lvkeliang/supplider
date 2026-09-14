@@ -196,6 +196,51 @@ func (s *Service) ReviewRisk(ctx context.Context, id string, in RiskReviewInput)
 	return doc, nil
 }
 
+// RiskFlagsInput carries manual external risk signals to set/clear
+// (ExecutedPerson 被执行人 / AdminPenalty 行政处罚). The personal tier has no
+// 企查查/天眼查 API, so this manual path is how a 淘汰-phase 风险预警 is recorded;
+// higher tiers populate the same fields automatically and the local engine
+// never overwrites them (applyRisk only touches shell_risk/notes).
+type RiskFlagsInput struct {
+	ExecutedPerson *bool `json:"executed_person"`
+	AdminPenalty   *bool `json:"admin_penalty"`
+}
+
+// SetRiskFlags records external risk signals on a supplier. Only the provided
+// signals are touched; the local-engine verdicts (shell_risk / notes / review)
+// are preserved. Changes are written to change_log (source=manual). A no-op
+// (nothing changed) returns the current document without persisting.
+func (s *Service) SetRiskFlags(ctx context.Context, id string, in RiskFlagsInput) (*domain.Supplier, error) {
+	doc, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	changed := false
+	if in.ExecutedPerson != nil && *in.ExecutedPerson != doc.RiskFlags.ExecutedPerson {
+		doc.ChangeLog = append(doc.ChangeLog, domain.ChangeEntry{
+			Field: "risk_flags.executed_person", Old: doc.RiskFlags.ExecutedPerson, New: *in.ExecutedPerson, Date: now, Source: domain.SourceManual,
+		})
+		doc.RiskFlags.ExecutedPerson = *in.ExecutedPerson
+		changed = true
+	}
+	if in.AdminPenalty != nil && *in.AdminPenalty != doc.RiskFlags.AdminPenalty {
+		doc.ChangeLog = append(doc.ChangeLog, domain.ChangeEntry{
+			Field: "risk_flags.admin_penalty", Old: doc.RiskFlags.AdminPenalty, New: *in.AdminPenalty, Date: now, Source: domain.SourceManual,
+		})
+		doc.RiskFlags.AdminPenalty = *in.AdminPenalty
+		changed = true
+	}
+	if !changed {
+		return doc, nil
+	}
+	doc.UpdatedAt = now
+	if err := s.store.Put(ctx, doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
 // reopenRiskReview clears a prior human review when an Update touches a
 // field the rule engine reads, so a stale clearance can never hide a NEW
 // signal. Risk inputs are basic_info (credit code, dates, capital, …),

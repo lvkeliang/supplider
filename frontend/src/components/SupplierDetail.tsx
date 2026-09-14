@@ -47,6 +47,7 @@ export function SupplierDetail({ id, go, aiEnabled = false }: { id: string; go: 
   const [aiSummary, setAiSummary] = useState<string | null>(null)
   const [riskBusy, setRiskBusy] = useState(false)
   const [riskReport, setRiskReport] = useState<string | null>(null)
+  const [flagBusy, setFlagBusy] = useState(false)
   // 合并重复档案选择器：从查重结果里直接挑选要并入的档案（手输 id 仅作兜底）。
   const [mergeOpen, setMergeOpen] = useState(false)
   const [mergeCandidates, setMergeCandidates] = useState<DuplicateMatch[] | null>(null)
@@ -144,6 +145,21 @@ export function SupplierDetail({ id, go, aiEnabled = false }: { id: string; go: 
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setAiBusy(false)
+    }
+  }
+
+  // 手动记录/清除外部风险信号（被执行人/行政处罚）——淘汰-phase 风险预警。
+  const toggleFlag = async (exec?: boolean, penalty?: boolean) => {
+    setFlagBusy(true)
+    setError('')
+    try {
+      await api.setRiskFlags(id, { executed_person: exec, admin_penalty: penalty })
+      toast.success(exec === true || penalty === true ? '已标记外部风险信号' : '已清除外部风险信号')
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setFlagBusy(false)
     }
   }
 
@@ -605,6 +621,28 @@ export function SupplierDetail({ id, go, aiEnabled = false }: { id: string; go: 
                 <SignalRow key={`${sig.code}-${i}`} sig={sig} />
               ))}
             </ul>
+            {/* 淘汰-phase 风险预警：手动记录外部信号（被执行人/行政处罚）。个人版无
+                企查查 API，这是该字段的唯一人工入口。 */}
+            {!archived && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 dark:border-slate-800 pt-2 text-xs">
+                <span className="text-slate-500 dark:text-slate-400">外部信号录入：</span>
+                <button
+                  className={`btn-ghost !px-2 !py-0.5 !text-xs ${ext?.executed_person ? 'bg-red-100 text-red-700 dark:bg-red-900/30' : ''}`}
+                  disabled={flagBusy}
+                  onClick={() => toggleFlag(!ext?.executed_person, undefined)}
+                >
+                  被执行人 {ext?.executed_person ? '✓ 已标记' : '标记'}
+                </button>
+                <button
+                  className={`btn-ghost !px-2 !py-0.5 !text-xs ${ext?.admin_penalty ? 'bg-red-100 text-red-700 dark:bg-red-900/30' : ''}`}
+                  disabled={flagBusy}
+                  onClick={() => toggleFlag(undefined, !ext?.admin_penalty)}
+                >
+                  行政处罚 {ext?.admin_penalty ? '✓ 已标记' : '标记'}
+                </button>
+                <span className="text-slate-400 dark:text-slate-500">遇司法/处罚记录时人工标记，列入风险预警。</span>
+              </div>
+            )}
             <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
               以上为本地规则自动检测结果（信用代码校验位 / 成立时长 / 资料完整度 / 资质 / 注册资本等），仅供人工审核参考，不会阻断录入。
             </p>

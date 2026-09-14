@@ -227,6 +227,10 @@ export const api = {
   // Human resolves a flagged supplier (人工审核闭环): 'verified' (papers
   // checked) or 'dismissed' (false positive). Clears it from the queue until
   // a risk-relevant edit reopens the review. Returns the updated document.
+  // 淘汰-phase 风险预警：手动标记/清除外部信号（被执行人/行政处罚）——个人版
+  // 无企查查 API，此为用户手动录入该字段的唯一途径。
+  setRiskFlags: (id: string, flags: { executed_person?: boolean; admin_penalty?: boolean }) =>
+    request<Supplier>('POST', `/api/v1/suppliers/${id}/risk-flags`, flags),
   reviewRisk: (id: string, outcome: 'verified' | 'dismissed', by = 'local', note = '') =>
     request<Supplier>('POST', `/api/v1/suppliers/${encodeURIComponent(id)}/risk-review`, {
       outcome,

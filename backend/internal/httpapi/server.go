@@ -239,6 +239,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /api/v1/suppliers/{id}/risk", s.handleSupplierRisk)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-check", s.handleRiskCheck)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-review", s.handleRiskReview)
+	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/risk-flags", s.handleSetRiskFlags)
 	s.Mux.HandleFunc("GET /api/v1/risk/shell", s.handleShellRiskQueue)
 	s.Mux.HandleFunc("POST /api/v1/suppliers/{id}/attachments", s.handleUploadAttachment)
 	s.Mux.HandleFunc("DELETE /api/v1/suppliers/{id}/attachments", s.handleDeleteAttachment)
@@ -1412,6 +1413,37 @@ func (s *Server) handleRiskReview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeServiceError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+// handleSetRiskFlags manually records external risk signals (被执行人 /
+// 行政处罚) on a supplier — the personal-tier path for 淘汰-phase 风险预警. Only
+// the provided flags are set/cleared; local-engine verdicts are preserved.
+func (s *Server) handleSetRiskFlags(w http.ResponseWriter, r *http.Request) {
+	var req supplier.RiskFlagsInput
+	if !decodeOptionalJSONBody(w, r, 1<<16, &req) {
+		return
+	}
+	if req.ExecutedPerson == nil && req.AdminPenalty == nil {
+		writeError(w, http.StatusBadRequest, "请至少提供 executed_person 或 admin_penalty")
+		return
+	}
+	id := r.PathValue("id")
+	doc, err := s.Service.SetRiskFlags(r.Context(), id, req)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	flags := make([]string, 0, 2)
+	if req.ExecutedPerson != nil && *req.ExecutedPerson {
+		flags = append(flags, "被执行人")
+	}
+	if req.AdminPenalty != nil && *req.AdminPenalty {
+		flags = append(flags, "行政处罚")
+	}
+	if len(flags) > 0 {
+		s.Audit.Record(r.Context(), "risk-flags", id, doc.BasicInfo.CompanyName+"（标记"+strings.Join(flags, "+")+"）")
 	}
 	writeJSON(w, http.StatusOK, doc)
 }
